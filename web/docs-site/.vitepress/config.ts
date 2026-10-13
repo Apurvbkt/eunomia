@@ -41,6 +41,15 @@ export default defineConfig({
     ["meta", { property: "og:image", content: "https://eunomia.finance/og.png" }],
     ["meta", { name: "twitter:card", content: "summary_large_image" }],
     ["meta", { name: "twitter:image", content: "https://eunomia.finance/og.png" }],
+    // Cloudflare Web Analytics, same beacon as the app's index.html
+    [
+      "script",
+      {
+        type: "module",
+        src: "https://static.cloudflareinsights.com/beacon.min.js",
+        "data-cf-beacon": '{"token": "76b4ab911fa44d26bee3e3db956783e5"}',
+      },
+    ],
   ],
   themeConfig: {
     logo: { src: "/favicon.svg", alt: `${NAME}` },
