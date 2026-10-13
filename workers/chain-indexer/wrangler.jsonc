@@ -6,6 +6,9 @@
   // stellar-base decodes XDR with Buffer
   "compatibility_flags": ["nodejs_compat"],
   "triggers": { "crons": ["*/15 * * * *"] },
+  // cron only: no public URL
+  "workers_dev": false,
+  "preview_urls": false,
   "observability": { "enabled": true },
   "vars": {
     "NETWORK": "testnet",
