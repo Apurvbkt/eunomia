@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "eunomia-chain-indexer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  // stellar-base decodes XDR with Buffer
+  "compatibility_flags": ["nodejs_compat"],
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "observability": { "enabled": true },
+  "vars": {
+    "NETWORK": "testnet",
+    "RPC_URL": "https://soroban-testnet.stellar.org",
+    // keep in sync with web/src/config.ts
+    "REGISTRY_ID": "CBEPVXK6BN2FZ3IYHV5KQUGROFHNBWBYHKHRZ5U3O7UWGIOPFOFE4ZE7"
+  }
+  // secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY  (wrangler secret put …)
+}

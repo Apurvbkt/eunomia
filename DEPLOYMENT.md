@@ -344,3 +344,19 @@ root rebuilt from real addresses (`packages/prover/src/payeeField.ts`).
 | proof submitted while the period was still open | refused in simulation, `Error(Contract, #6)` PeriodNotClosed |
 | **`verify` for period 20724, after it closed** | [`4abba703…`](https://stellar.expert/explorer/testnet/tx/4abba7034041f956e417cd3c6b180d170439033f0e09afd0ddca702b67944940) — ledger 4933698, `attested` · `last_period` → `20724` |
 | `check-attestation.ts --tx 4abba703…` | 7/7 checks, `attested` — the verifier re-ran the pairing check, and limits, root and total match the treasury |
+
+## Usage metrics — chain indexer (2026-10-13)
+
+`activity` only sees what the web app logs; payments an agent makes through eunomia-mcp never
+reached it. `workers/chain-indexer` is a Cloudflare Worker that, every 15 minutes, pages Stellar
+RPC events for the registry (`regd`) and every known treasury (`paid`, `session`, `revoked`,
+`withdrawn`, escrow, payee and limit changes) into Supabase (migration `0006_chain_events`).
+A stored cursor continues where the last run stopped — the RPC keeps only ~7 days of events.
+
+- Weekly numbers: `select * from chain_weekly;` (new treasuries, sessions, payments, paying
+  treasuries, repeat treasuries = paid on 2+ distinct days).
+- Deploy: `cd workers/chain-indexer && npm i && npx wrangler secret put SUPABASE_URL &&
+  npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY && npx wrangler deploy`.
+- Mainnet: a second deploy with `NETWORK=mainnet`, the mainnet RPC and registry id in `vars`.
+- Local run against the real RPC (first backfill, 2026-10-13): 13 pages, 17 registrations,
+  16 sessions, 7 payments, 1 revoke across 16 treasuries in the retained window.
