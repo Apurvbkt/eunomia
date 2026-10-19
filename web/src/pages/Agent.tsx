@@ -4,6 +4,7 @@
 // rule and the "registered but unfunded key" recovery path live in the provider.
 import { useEffect, useRef, useState } from "react";
 import AgentLoop from "../components/AgentLoop";
+import BudgetRequestCard from "../components/BudgetRequestCard";
 import ExceptionRequests from "../components/ExceptionRequests";
 import { EXPLORER, fmtXlm, shortAddr } from "../config";
 import { useNow } from "../lib/useNow";
@@ -16,6 +17,8 @@ export default function Agent() {
   const [agentKey, setAgentKey] = useState("");
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState(false);
+  // A budget request link (eunomia-mcp request_budget) lands here with its fields in the query.
+  const [hasRequest, setHasRequest] = useState(() => new URLSearchParams(window.location.search).has("sig"));
 
   const initCommand = `npx -y eunomia-mcp init --treasury ${t.treasuryId ?? "<treasury id>"}`;
   const copyInit = () => {
@@ -69,6 +72,7 @@ export default function Agent() {
   return (
     <div className="page">
       <div className="page__main">
+        {hasRequest && <BudgetRequestCard onDone={() => setHasRequest(false)} />}
         {active && session ? (
           <section className="verdict">
             <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>

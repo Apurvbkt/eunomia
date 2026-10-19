@@ -28,6 +28,7 @@ import {
   revokeSession,
   setLimits,
   setPaused,
+  setTaskBudget,
   type Lifecycle,
   type EunomiaState,
 } from "../lib/userTreasury";
@@ -63,6 +64,7 @@ import { discoverTreasuries, registerTreasury } from "../lib/registry";
 import { testSignerAvailable } from "../lib/testSigner";
 import { mergeTreasuries } from "../lib/treasuryList";
 import { useToast } from "./toastContext";
+import type { BudgetRequest } from "../lib/budgetRequestCodec";
 import {
   TreasuryContext,
   type ActionOutcome,
@@ -596,6 +598,40 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
     [address, treasuryId, loadState, toast],
   );
 
+  // An agent's budget request (eunomia-mcp request_budget), approved with one signature. The
+  // card that calls this has already checked the agent's signature and the treasury it names.
+  const approveBudget = useCallback(
+    async (r: BudgetRequest): Promise<ActionOutcome> => {
+      if (!address || !treasuryId) return fail("No treasury open.");
+      if (r.treasury !== treasuryId) return invalid("This request is for a different treasury — open that one first.");
+      setBusy("session");
+      toast("info", "Approving the agent's budget — confirm in your wallet…");
+      try {
+        const t = makeTreasury(treasuryId, await executorFor(address));
+        const validUntil = BigInt(Math.floor(Date.now() / 1000) + r.hours * 3600);
+        const res = await setTaskBudget(t, r.agent, validUntil, r.limit, r.payees);
+        if (res.ok) {
+          setSessionSecret(null);
+          void logActivity({ walletAddress: address, treasuryId, action: "session_start", txHash: res.hash });
+          const msg = "Budget approved ✓ — the agent can pay inside it, only to the payees it named.";
+          toast("success", msg, { hash: res.hash });
+          await loadState(treasuryId, address);
+          return { ok: true, msg, hash: res.hash };
+        }
+        const msg = `Blocked: ${res.errorMessage}`;
+        toast("error", msg);
+        return fail(msg);
+      } catch (e) {
+        const msg = sendErr(e);
+        toast("error", msg);
+        return fail(msg);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [address, treasuryId, loadState, toast],
+  );
+
   const revokeLeash = useCallback(async (): Promise<ActionOutcome> => {
     if (!address || !treasuryId) return fail("No treasury open.");
     setBusy("revoke");
@@ -963,6 +999,7 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
     spend,
     startLeash,
     revokeLeash,
+    approveBudget,
     runAutonomousTask,
     runAgentLoop,
     togglePause,

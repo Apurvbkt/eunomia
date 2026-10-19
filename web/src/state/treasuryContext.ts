@@ -5,6 +5,7 @@ import type { LoopStep } from "../lib/agentLoop";
 import type { Lifecycle, EunomiaState } from "../lib/userTreasury";
 import type { TreasuryRef } from "../lib/treasuryList";
 import type { TokenCode } from "../lib/token";
+import type { BudgetRequest } from "../lib/budgetRequestCodec";
 
 // One in-flight wallet action at a time (a wallet signs one tx at a time) — the key
 // names WHICH action runs, so its button can show progress while the rest stay locked.
@@ -78,6 +79,8 @@ export interface TreasuryContextValue {
    *  generating a local session key — the eunomia-mcp handshake. */
   startLeash: (cap: string, hours: string, agentPublicKey?: string) => Promise<ActionOutcome>;
   revokeLeash: () => Promise<ActionOutcome>;
+  /** Start a task budget an agent asked for (a verified budget request link). */
+  approveBudget: (r: BudgetRequest) => Promise<ActionOutcome>;
   runAutonomousTask: (to?: string) => Promise<ActionOutcome>;
   /** The agent's own loop — pay, get refused, ask the owner — reported step by step as
    *  each one lands on-chain. `onStep` receives the whole list every time one changes. */

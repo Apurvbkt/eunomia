@@ -367,6 +367,22 @@ export async function setSession(
   );
 }
 
+/** A Leash for one task (owner-signed, v4): like a session, but the agent may pay only the
+ *  named payees. What the owner signs when approving an agent's budget request. */
+export async function setTaskBudget(
+  t: Treasury,
+  agent: string,
+  validUntil: bigint,
+  limitStroops: bigint,
+  payees: string[],
+): Promise<PayResult> {
+  return sendTx(
+    () => t.client.set_task_budget({ agent, valid_until: validUntil, limit: limitStroops, payees }),
+    "Budget approval failed.",
+    t.submit,
+  );
+}
+
 /** Instantly revoke the session (owner-signed) — spending falls back to the wallet. */
 export async function revokeSession(t: Treasury): Promise<PayResult> {
   return sendTx(() => t.client.revoke_session(), "Session revoke failed.", t.submit);
