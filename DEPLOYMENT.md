@@ -348,6 +348,24 @@ Verified live on the smoke treasury:
 | monthly budget set to exactly the 11 XLM spent, then 1 stroop | [`b003a1f6…6811`](https://stellar.expert/explorer/testnet/tx/b003a1f674b35a3b50da3e85701559657afaf8a801d259a63b8a6e7344496811) · refused, `#15` |
 | factory address prediction (salt `a4e1b0c7…f809`) | [`538d80f2…95ad`](https://stellar.expert/explorer/testnet/tx/538d80f292cbff4f2f107a32889c457bd9c46232298dc55048aa56b0911495ad) → `CAJHWB3E…4B25`, pinned in `createTreasury.test.ts` |
 
+### Agents buying services — float, x402, task budget (eunomia-mcp 0.3.0)
+
+`packages/mcp/scripts/live-spend.ts` drives eunomia-mcp's own code against testnet: a fresh v4
+treasury [`CD2FOPKK…H3GI`](https://stellar.expert/explorer/testnet/contract/CD2FOPKKLJEFU7CWUTIG77ZHJVJLLBAMWJ5XVYFAFKCDGUYIVPCAH3GI)
+(owner `alice`; the agent's own address capped at 4 XLM a month), a task budget naming the agent
+and one vendor, and a local seller whose 402 is verified and settled by the official
+`@x402/stellar` facilitator.
+
+| Step | Result |
+|---|---|
+| `fund_float` 3 XLM (treasury `pay()` to the agent) | [`c5c578c4…d5cf`](https://stellar.expert/explorer/testnet/tx/c5c578c4d2ec7cc4e391f7517bfc044cb0d284eb88bbe4842e3022902cddd5cf) |
+| `call_service`: 402 → signed from the float → settled to the vendor, answer returned | [`9d4b23f1…d472`](https://stellar.expert/explorer/testnet/tx/9d4b23f11b85e34f45047308409021fc6e6bd65f480bfb98aa6b3e719e6fd472) |
+| `call_service` to a payee the treasury never approved | refused before signing — not approved, outside the task budget |
+| `fund_float` 2 XLM more (cap 4) | refused, `#14 ExceedsPayeeCap` |
+| `sweep_float` 2 XLM back | [`f05e8ef0…d7c2`](https://stellar.expert/explorer/testnet/tx/f05e8ef012668b92c80997b244cf6eab2d6799aa5b559ecae27667a430a7d7c2); treasury ends at 19 XLM (20 − 3 + 2) |
+
+Why a float and not the treasury paying the 402 itself: [`docs/MPP-DIRECT-SETTLEMENT.md`](docs/MPP-DIRECT-SETTLEMENT.md).
+
 The app creates through the v4 factory; the relay keeps admitting the v3.5 factory and wasm
 (`LEGACY_TREASURY_*` in `web/src/lib/treasuryWasm.ts`), so earlier treasuries keep working.
 

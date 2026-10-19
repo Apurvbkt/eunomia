@@ -4,7 +4,7 @@ Connect any MCP-capable AI agent (Claude Code, Claude Desktop, …) to a [Eunomi
 
 The agent gets a **scoped, revocable credential**. The treasury contract enforces the owner's budget **on-chain** — per-payment cap, rolling 24h limit, approved payees, a time-bound session cap — and refuses anything outside it. The agent never holds the funds and never sees the owner's key.
 
-> Published on npm as [`eunomia-mcp`](https://www.npmjs.com/package/eunomia-mcp). The agent **pays** (direct or from an x402 payment requirement), reads every refusal as the **contract's own error code**, and can **ask the owner for an exception** that the dashboard shows. Live **testnet** only; nothing here touches mainnet.
+> Published on npm as [`eunomia-mcp`](https://www.npmjs.com/package/eunomia-mcp). The agent **finds and buys paid services** (the ROZO MPP Router catalog, any x402 seller) from a bounded float, **pays** treasury payees directly, reads every refusal as the **contract's own error code**, and **asks the owner for a task budget** or an exception. Live on **testnet**; the mainnet beta contracts are not deployed yet.
 
 ## Connect your agent
 
@@ -18,7 +18,7 @@ This generates an Ed25519 key, funds it on testnet (it pays its own transaction 
 
 **2. The treasury owner authorises that key** — Eunomia dashboard → your treasury → **Agent** → paste the public key, choose a spending cap and a duration → **Start Leash**. That signs one `set_session` transaction with the owner's passkey or wallet. The owner revokes it from the same page at any time (`revoke_session`), instantly.
 
-**3. Add the server to your MCP client** — `init` prints the snippet; `eunomia-mcp config` prints it again. Needs Node 20 or newer.
+**3. Add the server to your MCP client** — let `init` write it: add `--client claude-desktop`, `--client cursor` or `--client claude-code` to the command in step 1. The client's config file is merged (other servers stay), the old one is kept as `.bak`, and on Windows the server is started through `cmd` so the desktop app finds `npx`. Then restart the client. Without `--client`, `init` prints the snippet and `eunomia-mcp config` prints it again; the manual steps below are for that case. Needs Node 20 or newer.
 
 **Claude Desktop** (works on the free plan; no `claude mcp add`, that command is for Claude Code):
 
@@ -60,6 +60,12 @@ claude mcp add eunomia -e EUNOMIA_TREASURY=<C…> -e EUNOMIA_NETWORK=testnet -- 
 | `pay` | `to` + `amount` (+ `taskId?`), **or** `x402` (one element of a 402 response's `accepts[]`) | Signs `pay(task_id, to, amount)` with the Leash key and submits it. `paid: true` + `txHash` + explorer link, or `paid: false` with the `stage` the refusal came from (`preflight` / `simulation` / `onchain`) and `reasons[]` in the contract's codes. A refusal is not an error — it is the policy working. |
 | `request_exception` | `to`, `amount` (+ `taskId?`) | Files a request the owner sees on the dashboard's Agent page (see below); returns its `id`, the request `txHash`, the `reasons` and what the owner can do about each. Refuses to file when the payment is already inside policy. |
 | `check_exception` | `id` (+ `close?`) | `approved` when the treasury would now accept that payment (then call `pay`), `pending` while it would still refuse, `closed` when the entry is gone. `close: true` removes the entry. |
+| `find_services` | `query?`, `category?`, `verifiedOnly?`, `limit?` | Paid APIs from the ROZO MPP Router catalog (Stellar mainnet USDC): `url`, `method`, price, `payTo` and whether ROZO has paid through the route itself. Free. |
+| `fund_float` | `amount` (+ `taskId?`) | Moves `amount` from the treasury to the agent's own account — an ordinary `pay()`, so every on-chain limit applies, including a monthly cap the owner sets on the agent's address. |
+| `call_service` | `url`, `maxPrice` (+ `method?`, `body?`, `service?`) | One HTTP request; its `402` is paid from the float with the official x402 client — only if the price is within `maxPrice`, the per-payment cap and the float, and `payTo` is a treasury-approved payee (inside the task budget when there is one). Returns the service's answer and the payment `txHash`; a refusal lists each payment option and why, with nothing signed. |
+| `sweep_float` | `amount?` | Sends the rest of the float back to the treasury. |
+| `float_status` | `last?` | The float's balance and what `call_service` bought (service, price, payee, tx hash). |
+| `request_budget` | `amount`, `hours`, `payees[]`, `task` | A link for the owner: their app shows the request and approves it with one signature (`set_task_budget`). The request is signed with the agent's key, so an edited link does not verify. |
 
 Every call reads the chain fresh. Amounts are decimal strings in the treasury's token, with raw stroops alongside where an agent would compute with them. Which token that is comes back as **`unit`** next to every amount (`"USDC"`, `"XLM"`) — read from the token contract's own `symbol()`, so it is right for whatever the treasury holds; `token` carries the contract id, which is what an x402 requirement is matched against. `unit` is `null` only when the chain could not be asked, and never blocks a payment.
 
@@ -69,7 +75,17 @@ Every call reads the chain fresh. Amounts are decimal strings in the treasury's 
 
 ### x402
 
-Stellar's x402 has one scheme, `exact`. Hand `pay` an `accepts[]` entry from a `402 Payment Required` response (or decode the `PAYMENT-REQUIRED` header with the SDK's `decodePaymentRequired`) and it is vetted — scheme, network, the treasury's asset — then settled through the treasury's on-chain `pay()` to `payTo`, under the same policy as any other payment. The facilitator handshake is **not** part of this package (Instawards scope): the funded-agent-account interop with the official `@x402/stellar` client lives in the repo's `packages/x402`.
+Stellar's x402 has one scheme, `exact`. Hand `pay` an `accepts[]` entry from a `402 Payment Required` response (or decode the `PAYMENT-REQUIRED` header with the SDK's `decodePaymentRequired`) and it is vetted — scheme, network, the treasury's asset — then settled through the treasury's on-chain `pay()` to `payTo`, under the same policy as any other payment. That suits a seller who only needs to be paid; a seller whose facilitator settles the payment itself (ROZO, most x402 APIs) is bought with `call_service` from the float, below.
+
+### Buying services: the float
+
+Stellar's x402 and MPP facilitators settle from a regular `G…` account only (stellar/stellar-mpp-sdk#90, x402-foundation/x402#3158), so a contract treasury cannot be the payer of a 402 itself. The agent pays from a **float** on its own account instead, and the float is bounded on every side: it is funded by the treasury's own `pay()` (all limits, plus a monthly payee cap on the agent's address), `call_service` signs only within the rules above, and `sweep_float` returns what the task did not use. Almost every ROZO route settles to one router address — approving it opens the catalog, and a cap on it is one bucket for all of it; narrower limits are per call (`maxPrice`) and per task (`request_budget`).
+
+On mainnet the agent's account needs ~3 XLM and a USDC trustline before the first `fund_float`: send the XLM, then `eunomia-mcp trustline --network pubnet`.
+
+### Task budgets
+
+`request_budget` asks for an amount, a duration and the payees a task needs. The owner opens the link, sees exactly that and the agent's key, and signs `set_task_budget` once; the agent then pays inside it with no prompts, and the contract refuses any payee the budget does not name (`17 PayeeOutsideTaskBudget`). A budget replaces whatever Leash was running.
 
 ### Exceptions, without a server
 
@@ -93,7 +109,8 @@ Prints the same JSON the tool returns. Exit code `0` paid, `3` refused by policy
 
 - **Payee listing is rebuilt from events.** The whitelist is not enumerable on-chain, so `list_allowed_payees` replays the contract's `payee_add` / `payee_rm` events (the public RPC keeps ~7 days) and a local cache, then confirms each address with `is_payee`. A payee approved before that window on a machine that never saw it will not be listed — `check_payee` is exact for any address.
 - **Exception requests are visible while the Leash is.** The dashboard reads them from the session agent's account; after a revoke there is no agent to read. There is no "deny" signal yet — an unresolved request simply stays pending until the agent closes it (Week 3 folds requests into the activity feed).
-- **Testnet only** in this release. `EUNOMIA_NETWORK=pubnet` requires `EUNOMIA_RPC_URL` and a key you fund yourself.
+- **The float is outside the contract.** What `fund_float` moved is the agent's until it is spent or swept; the bounds above keep it small and short-lived, not untouchable. Purchases are logged locally (`float_status`) — the chain records the payment, not the service.
+- **Mainnet beta pending.** `EUNOMIA_NETWORK=pubnet` works (it needs `EUNOMIA_RPC_URL`); the v4 contracts are on testnet today.
 - `check_budget` is a pre-flight. The contract is the final word at payment time; the two use the same rules and the same error codes.
 
 ## SDK

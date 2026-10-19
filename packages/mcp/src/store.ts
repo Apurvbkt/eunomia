@@ -50,3 +50,52 @@ export function fileExceptionStore(dir: string): ExceptionStore {
     },
   };
 }
+
+/** What the agent bought through call_service — the part of "what did it spend on" the chain
+ *  cannot answer: a float payment on-chain names only the address paid, never the service. */
+export interface PurchaseRecord {
+  /** unix seconds */
+  at: number;
+  /** catalog id when the call came from find_services, else null */
+  service: string | null;
+  url: string;
+  /** stroops, decimal string */
+  amount: string;
+  payTo: string;
+  txHash: string | null;
+  /** HTTP status of the paid request */
+  status: number;
+}
+
+export interface PurchaseLog {
+  load(treasuryId: string): PurchaseRecord[];
+  append(treasuryId: string, record: PurchaseRecord): void;
+}
+
+export function memoryPurchaseLog(): PurchaseLog {
+  const m = new Map<string, PurchaseRecord[]>();
+  return {
+    load: (id) => [...(m.get(id) ?? [])],
+    append: (id, r) => void m.set(id, [...(m.get(id) ?? []), r]),
+  };
+}
+
+export function filePurchaseLog(dir: string): PurchaseLog {
+  const file = (id: string) => join(dir, `${id}.purchases.json`);
+  const load = (id: string): PurchaseRecord[] => {
+    try {
+      if (!existsSync(file(id))) return [];
+      const parsed: unknown = JSON.parse(readFileSync(file(id), "utf8"));
+      return Array.isArray(parsed) ? (parsed as PurchaseRecord[]) : [];
+    } catch {
+      return [];
+    }
+  };
+  return {
+    load,
+    append(id, record) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(file(id), JSON.stringify([...load(id), record], null, 2));
+    },
+  };
+}

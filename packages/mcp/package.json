@@ -1,7 +1,7 @@
 {
   "name": "eunomia-mcp",
-  "version": "0.2.2",
-  "description": "MCP server + TypeScript SDK that lets any AI agent spend from a Eunomia treasury on Stellar — inside an owner-set on-chain budget, blocked by the contract when out of policy, with x402 payment requirements and owner-approved exceptions.",
+  "version": "0.3.0",
+  "description": "MCP server + TypeScript SDK that lets any AI agent spend from a Eunomia treasury on Stellar — find and buy paid services from a bounded float, pay inside an owner-set on-chain budget, ask for task budgets, refused by the contract when out of policy.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -43,12 +43,16 @@
     "smoke": "tsx scripts/client-smoke.ts",
     "sync:bindings": "node scripts/same.mjs --write ../treasury-client/src/index.ts src/bindings/treasury.ts",
     "check:bindings": "node scripts/same.mjs ../treasury-client/src/index.ts src/bindings/treasury.ts",
-    "check:codec": "node scripts/same.mjs src/exceptionCodec.ts ../../web/src/lib/exceptionCodec.ts",
-    "prepublishOnly": "npm run check:bindings && npm run check:codec && npm test && npm run build"
+    "check:codec": "node scripts/same.mjs src/exceptionCodec.ts ../../web/src/lib/exceptionCodec.ts && node scripts/same.mjs src/budgetRequestCodec.ts ../../web/src/lib/budgetRequestCodec.ts",
+    "prepublishOnly": "npm run check:bindings && npm run check:codec && npm test && npm run build",
+    "live:spend": "tsx scripts/live-spend.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@stellar/stellar-sdk": "^16.2.0",
+    "@stellar/stellar-sdk": "^16.3.1",
+    "@x402/core": "~2.28.0",
+    "@x402/fetch": "~2.28.0",
+    "@x402/stellar": "~2.28.0",
     "buffer": "6.0.3",
     "zod": "^3.25.0"
   },
@@ -56,5 +60,8 @@
     "@types/node": "^24.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
+  },
+  "overrides": {
+    "axios": "^1.20.0"
   }
 }

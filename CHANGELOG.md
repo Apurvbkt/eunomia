@@ -7,6 +7,19 @@ deployed addresses and on-chain proofs in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ## [Unreleased]
 
+- **Added (eunomia-mcp 0.3.0, SOW 2 deliverables 2-3)** — agents buy real services.
+  `find_services` searches the ROZO MPP Router catalog (hundreds of paid APIs on Stellar
+  mainnet USDC); `fund_float` tops up the agent's own account through the treasury's
+  `pay()`; `call_service` pays a 402 from that float with the official x402 client, only
+  inside the treasury's rules (token, price caps, approved payee, task budget) — nothing is
+  signed otherwise; `sweep_float` returns the rest; `float_status` lists what was bought.
+  `request_budget` gives the owner a signed link the app's Agent page shows and approves with
+  one signature (`set_task_budget`). `init --client claude-desktop|cursor|claude-code` writes
+  the client config itself (merged, with a `.bak`); `trustline` prepares a mainnet agent
+  account for USDC. Proven on testnet end to end (`scripts/live-spend.ts`, DEPLOYMENT.md).
+  The direct-settlement test came back negative and is written up in
+  [`docs/MPP-DIRECT-SETTLEMENT.md`](docs/MPP-DIRECT-SETTLEMENT.md).
+
 - **Fixed (the 08-07 silent deploy)** — a relayed transaction could be announced as done
   before the ledger agreed. The relay waits a few seconds and then answers 200 with whatever
   it saw, PENDING and NOT_FOUND included; the app kept only the hash and the treasury setup

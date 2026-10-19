@@ -4,7 +4,9 @@
 import { parseArgs } from "node:util";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { computeBudget } from "./budget.js";
+import { CLIENTS, writeClientConfig, type ClientName } from "./clientConfig.js";
 import { createCredential, fundOnTestnet, isValidContractId, saveCredential } from "./credential.js";
+import { addTrustline } from "./float.js";
 import { toStroops, txUrl } from "./format.js";
 import { homeDir, resolveNetwork } from "./network.js";
 import { recordRejectionOnChain } from "./onchain.js";
@@ -18,8 +20,11 @@ const USAGE = `eunomia-mcp ${SERVER_VERSION} — connect an AI agent to a Eunomi
 
 usage:
   eunomia-mcp [serve]                       run the MCP server on stdio (what Claude spawns)
-  eunomia-mcp init --treasury <C…> [--network testnet|pubnet] [--force] [--skip-fund]
-                                            create this agent's credential and print the key the owner authorises
+  eunomia-mcp init --treasury <C…> [--network testnet|pubnet] [--client claude-desktop|cursor|claude-code]
+                  [--force] [--skip-fund]   create this agent's credential, print the key the owner authorises,
+                                            and with --client add the server to that client's config
+  eunomia-mcp trustline [--treasury <C…>]   let the agent's account hold the treasury's token (mainnet USDC;
+                                            once, before the first fund_float)
   eunomia-mcp status [--treasury <C…>]      what this agent may spend right now (JSON)
   eunomia-mcp pay --to <G…|C…> --amount <decimal> [--task <n>] [--treasury <C…>] [--record-rejection]
                                             pay from the treasury with this agent's Leash key (JSON);
@@ -29,7 +34,8 @@ usage:
   eunomia-mcp config [--client json|claude-code|claude-desktop] [--treasury <C…>]
                                             print the MCP client configuration for this treasury
 
-env: EUNOMIA_TREASURY, EUNOMIA_NETWORK (default testnet), EUNOMIA_RPC_URL, EUNOMIA_HOME (~/.eunomia), EUNOMIA_AGENT_SECRET
+env: EUNOMIA_TREASURY, EUNOMIA_NETWORK (default testnet), EUNOMIA_RPC_URL, EUNOMIA_HOME (~/.eunomia), EUNOMIA_AGENT_SECRET,
+     EUNOMIA_APP_URL (where budget requests link; default https://eunomia.finance)
 `;
 
 const { values: opts, positionals } = parseArgs({
@@ -66,12 +72,18 @@ function requireTreasury(env: NodeJS.ProcessEnv): string {
   return id;
 }
 
-function configSnippet(env: NodeJS.ProcessEnv, client: string): string {
-  const treasury = requireTreasury(env);
-  const network = resolveNetwork(env).name;
-  const envBlock: Record<string, string> = { EUNOMIA_TREASURY: treasury, EUNOMIA_NETWORK: network };
+/** The env a client starts the server with — never the agent's secret, which stays in the
+ *  credential file. */
+function serverEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const envBlock: Record<string, string> = { EUNOMIA_TREASURY: requireTreasury(env), EUNOMIA_NETWORK: resolveNetwork(env).name };
   if (env.EUNOMIA_RPC_URL) envBlock.EUNOMIA_RPC_URL = env.EUNOMIA_RPC_URL;
   if (env.EUNOMIA_HOME) envBlock.EUNOMIA_HOME = env.EUNOMIA_HOME;
+  if (env.EUNOMIA_APP_URL) envBlock.EUNOMIA_APP_URL = env.EUNOMIA_APP_URL;
+  return envBlock;
+}
+
+function configSnippet(env: NodeJS.ProcessEnv, client: string): string {
+  const envBlock = serverEnv(env);
   switch (client) {
     case "claude-code": {
       const flags = Object.entries(envBlock).map(([k, v]) => `-e ${k}=${v}`).join(" ");
@@ -104,8 +116,8 @@ async function init(): Promise<void> {
   const home = homeDir(env);
   const cred = createCredential(net.name, treasury);
   const path = saveCredential(home, cred, { force: opts.force });
-  let funded = "skipped (--skip-fund)";
-  if (!opts["skip-fund"]) {
+  let funded = net.friendbot ? "skipped (--skip-fund)" : "mainnet: fund it yourself (see below)";
+  if (!opts["skip-fund"] && net.friendbot) {
     try {
       await fundOnTestnet(net, cred.agentPublicKey);
       funded = "funded via friendbot";
@@ -121,11 +133,42 @@ Next, the treasury OWNER authorises this key (the secret stays on this machine):
   and a duration → Start Leash (signed with the owner's passkey or wallet).
   Revoke it from the same page at any time.
 
-Then add the server to your MCP client:
-${configSnippet(env, opts.client ?? "json")}
+${net.friendbot ? "" : MAINNET_FUNDING}${clientStep(env)}
 
 Check it: eunomia-mcp status --treasury ${treasury}
 `);
+}
+
+const MAINNET_FUNDING = `On mainnet the agent's account needs XLM before it can do anything: send it ~3 XLM
+(account reserve, the token trustline and fees), then run: eunomia-mcp trustline --network pubnet
+
+`;
+
+/** Write the client's config when --client names one we know; otherwise print the JSON. */
+function clientStep(env: NodeJS.ProcessEnv): string {
+  const client = opts.client as ClientName | undefined;
+  if (!client || !CLIENTS.includes(client)) {
+    return `Then add the server to your MCP client (or rerun with --client claude-desktop|cursor|claude-code):
+${configSnippet(env, "json")}`;
+  }
+  try {
+    const done = writeClientConfig(client, serverEnv(env));
+    if (client === "claude-code") return `Added to Claude Code (${done.where}). Start a new session to load it.`;
+    const kept = done.backup ? ` (previous version kept as ${done.backup})` : "";
+    return `Added to ${client}: ${done.where}${kept}\nRestart ${client === "cursor" ? "Cursor" : "Claude Desktop"} to load it.`;
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    return `Could not write the ${client} config (${why}). Add this yourself:\n${configSnippet(env, client === "claude-code" ? "claude-code" : "json")}`;
+  }
+}
+
+async function trustline(): Promise<void> {
+  const env = effectiveEnv();
+  requireTreasury(env);
+  const ctx = contextFromEnv(env);
+  const r = await addTrustline(ctx);
+  console.log(JSON.stringify({ ...r, ...(r.txHash ? { link: txUrl(ctx.net.name, r.txHash) } : {}) }, null, 2));
+  if (r.status === "FAILED") process.exitCode = 1;
 }
 
 async function status(): Promise<void> {
@@ -189,6 +232,8 @@ async function main(): Promise<void> {
       return status();
     case "pay":
       return pay();
+    case "trustline":
+      return trustline();
     case "config":
       console.log(configSnippet(effectiveEnv(), opts.client ?? "json"));
       return;

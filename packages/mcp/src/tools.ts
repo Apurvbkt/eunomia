@@ -338,6 +338,16 @@ export function registerTools(server: McpServer, ctx: ServerContext): void {
         if (pre.reasons.length === 0) {
           return ok({ requested: false, allowed: true, message: "This payment is inside the policy — call pay." });
         }
+        // A task budget's payee list is changed by a new budget, not by an exception.
+        if (pre.reasons.some((r) => r.code === 17)) {
+          return ok({
+            requested: false,
+            allowed: false,
+            reasons: pre.reasons,
+            message: "Not filed: this payee is outside the task budget — ask for a budget that names it.",
+            nextStep: "request_budget",
+          });
+        }
         const noTrustline = pre.reasons.find((r) => r.code === TRUSTLINE_MISSING);
         if (noTrustline) {
           return ok({

@@ -3,11 +3,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { fileCache, type KnownPayeeCache } from "./cache.js";
 import { resolveCredential, type Credential } from "./credential.js";
 import { homeDir, resolveNetwork, type NetworkConfig } from "./network.js";
-import { fileExceptionStore, type ExceptionStore } from "./store.js";
+import { fileExceptionStore, filePurchaseLog, type ExceptionStore, type PurchaseLog } from "./store.js";
+import { registerSpendTools } from "./spendTools.js";
 import { registerTools } from "./tools.js";
 
 export const SERVER_NAME = "eunomia-mcp";
-export const SERVER_VERSION = "0.2.2";
+export const SERVER_VERSION = "0.3.0";
 
 export interface ServerContext {
   net: NetworkConfig;
@@ -17,6 +18,10 @@ export interface ServerContext {
   cache: KnownPayeeCache;
   /** exception requests this agent filed (bookmarks; the chain is the truth) */
   exceptions: ExceptionStore;
+  /** what call_service bought (absent in tests that do not buy) */
+  purchases?: PurchaseLog;
+  /** where the owner approves things — budget requests link here */
+  appUrl?: string;
   /** unix seconds; injectable for tests */
   now?: () => number;
 }
@@ -31,11 +36,14 @@ export function contextFromEnv(env: NodeJS.ProcessEnv): ServerContext {
     credential: treasuryId ? resolveCredential(env, home, net.name, treasuryId) : null,
     cache: fileCache(join(home, net.name)),
     exceptions: fileExceptionStore(join(home, net.name)),
+    purchases: filePurchaseLog(join(home, net.name)),
+    appUrl: env.EUNOMIA_APP_URL?.trim() || "https://eunomia.finance",
   };
 }
 
 export function createServer(ctx: ServerContext): McpServer {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
   registerTools(server, ctx);
+  registerSpendTools(server, ctx);
   return server;
 }
