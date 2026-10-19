@@ -6,10 +6,15 @@
 //! Every payment is checked against a policy (payee whitelist, per-task limit,
 //! rolling 24h limit) and rejected on-chain if it violates the policy. Spend is
 //! accounted per task so each agent payment is automatically attributable.
+//!
+//! v4 adds the limits users asked for in the first interviews — a calendar-month budget
+//! and a monthly cap per payee — plus a deposit cap fixed at deploy (the mainnet beta runs
+//! unaudited, so how much one treasury can take in is bounded from day one) and task
+//! budgets: a Leash that may only pay a named set of payees.
 
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error,
-    symbol_short, token, Address, BytesN, Env,
+    symbol_short, token, Address, BytesN, Env, Vec,
 };
 
 #[contracterror]
@@ -28,6 +33,12 @@ pub enum Error {
     ExceedsSessionLimit = 10,
     InvalidLimits = 11,
     InvalidDeadline = 12,
+    // 13 is deliberately skipped: the USDC token contract raises #13 (missing trustline)
+    // from inside `pay`, and agents read both through the same `Error(Contract, #N)`.
+    ExceedsPayeeCap = 14,
+    ExceedsMonthlyLimit = 15,
+    ExceedsDepositCap = 16,
+    PayeeOutsideTaskBudget = 17,
 }
 
 #[contracttype]
@@ -95,6 +106,18 @@ pub enum DataKey {
     Locked,
     Session,
     Paused,
+    // ---- v4 ----
+    /// Most this treasury may hold after a `deposit`. Set once in the constructor, no setter.
+    DepositCap,
+    /// Most the agent may move in one UTC calendar month (0 / absent = no monthly limit).
+    MonthlyLimit,
+    /// Agent-moved value per month, keyed by `month_of(timestamp)`.
+    MonthSpent(u32),
+    /// Most one payee may receive per UTC calendar month (absent = only the other limits).
+    PayeeCap(Address),
+    PayeeSpent(Address, u32),
+    /// The payees the current Leash may pay. Empty / absent = any approved payee.
+    SessionPayees,
 }
 
 /// Minimal reputation-oracle interface Eunomia reads to authorize a *non-whitelisted*
@@ -122,6 +145,15 @@ const MAX_TTL_LEDGERS: u32 = 3_110_400; // ≈ 6 months of 5s ledgers (order of 
 // extended). Closes audit finding C3.
 const INSTANCE_TTL_THRESHOLD: u32 = LEDGERS_PER_WEEK; // extend once < ~1 week of TTL remains…
 const INSTANCE_TTL_EXTEND_TO: u32 = 4 * LEDGERS_PER_WEEK; // …back up to ~1 month
+// Month buckets (total and per payee) must outlive the month they count. Every write bumps
+// them to ~4 months, so a bucket that is still being read can never have been archived.
+const MONTH_TTL_THRESHOLD: u32 = 8 * LEDGERS_PER_WEEK;
+const MONTH_TTL_EXTEND_TO: u32 = 17 * LEDGERS_PER_WEEK;
+/// A task budget names at most this many payees — it lives in instance storage, which every
+/// call loads.
+pub const MAX_TASK_PAYEES: u32 = 16;
+/// Reported by `version()` so clients can tell which policy surface a treasury speaks.
+pub const VERSION: u32 = 4;
 
 /// How many payments the compliance circuit can attest to in one period.
 ///
@@ -144,6 +176,9 @@ impl Treasury {
     /// Atomic init at deploy time (no front-runnable `initialize`).
     /// Limits are validated here so a treasury can never exist with a policy
     /// that contradicts itself (e.g. per-task above daily).
+    ///
+    /// `deposit_cap` (0 = none) is fixed for the treasury's life: nothing can raise it, so a
+    /// factory that pins one hands out treasuries the owner cannot over-fund through `deposit`.
     pub fn __constructor(
         env: Env,
         admin: Address,
@@ -151,10 +186,12 @@ impl Treasury {
         token: Address,
         daily_limit: i128,
         per_task_limit: i128,
+        deposit_cap: i128,
     ) {
-        if !Self::limits_are_coherent(daily_limit, per_task_limit) {
+        if !Self::limits_are_coherent(daily_limit, per_task_limit) || deposit_cap < 0 {
             panic_with_error!(&env, Error::InvalidLimits);
         }
+        env.storage().instance().set(&DataKey::DepositCap, &deposit_cap);
         let cfg = Config {
             admin,
             agent,
@@ -257,9 +294,41 @@ impl Treasury {
             spent: 0,
         };
         env.storage().instance().set(&DataKey::Session, &session);
+        // A plain Leash may pay any approved payee: whatever a previous task budget named
+        // must not silently narrow (or outlive) the new credential.
+        env.storage().instance().remove(&DataKey::SessionPayees);
         env.events()
             .publish((symbol_short!("session"),), (agent, valid_until, limit));
         Ok(())
+    }
+
+    /// A Leash for one task: like `set_session`, but the agent may only pay the payees
+    /// listed here (each must still pass the whitelist / reputation gate). This is what the
+    /// owner signs when approving an agent's budget request — once, for the whole task.
+    /// Admin-only.
+    pub fn set_task_budget(
+        env: Env,
+        agent: Address,
+        valid_until: u64,
+        limit: i128,
+        payees: Vec<Address>,
+    ) -> Result<(), Error> {
+        if payees.is_empty() || payees.len() > MAX_TASK_PAYEES {
+            return Err(Error::InvalidLimits);
+        }
+        Self::set_session(env.clone(), agent.clone(), valid_until, limit)?;
+        env.storage().instance().set(&DataKey::SessionPayees, &payees);
+        env.events()
+            .publish((symbol_short!("budget"), agent), (valid_until, limit, payees));
+        Ok(())
+    }
+
+    /// The payees the current Leash is restricted to; empty when it may pay any approved one.
+    pub fn session_payees(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::SessionPayees)
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     /// Instantly revoke the session — spending falls back to the root agent.
@@ -269,7 +338,115 @@ impl Treasury {
         cfg.admin.require_auth();
         Self::bump_instance(&env);
         env.storage().instance().remove(&DataKey::Session);
+        env.storage().instance().remove(&DataKey::SessionPayees);
         env.events().publish((symbol_short!("revoked"),), ());
+    }
+
+    // ---- v4 limits: calendar month, per payee, deposit cap ---------------------
+
+    /// Most the agent may move per UTC calendar month, across every payee. Admin-only;
+    /// 0 removes the monthly limit. Like the daily limit, lowering it below what the month
+    /// already holds simply stops spending until the month turns.
+    pub fn set_monthly_limit(env: Env, limit: i128) -> Result<(), Error> {
+        let cfg = Self::cfg(&env);
+        cfg.admin.require_auth();
+        Self::bump_instance(&env);
+        if limit < 0 {
+            return Err(Error::InvalidLimits);
+        }
+        env.storage().instance().set(&DataKey::MonthlyLimit, &limit);
+        env.events().publish((symbol_short!("monthly"),), limit);
+        Ok(())
+    }
+
+    pub fn monthly_limit(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::MonthlyLimit).unwrap_or(0)
+    }
+
+    /// Most `payee` may receive per UTC calendar month. Admin-only; 0 removes the cap. The cap
+    /// does not approve the payee — it narrows what an approved (or reputation-gated) payee
+    /// can be paid. Capping the agent's own float address is what bounds money that has left
+    /// the treasury's protection.
+    pub fn set_payee_cap(env: Env, payee: Address, cap: i128) -> Result<(), Error> {
+        let cfg = Self::cfg(&env);
+        cfg.admin.require_auth();
+        Self::bump_instance(&env);
+        if cap < 0 {
+            return Err(Error::InvalidLimits);
+        }
+        let key = DataKey::PayeeCap(payee.clone());
+        if cap == 0 {
+            env.storage().persistent().remove(&key);
+        } else {
+            env.storage().persistent().set(&key, &cap);
+        }
+        env.events().publish((symbol_short!("payee_cap"), payee), cap);
+        Ok(())
+    }
+
+    /// The monthly cap on `payee`, or 0 when it has none.
+    pub fn payee_cap(env: Env, payee: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PayeeCap(payee))
+            .unwrap_or(0)
+    }
+
+    /// What `payee` has been paid (or had committed in escrow) in `month`.
+    pub fn payee_spent(env: Env, payee: Address, month: u32) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PayeeSpent(payee, month))
+            .unwrap_or(0)
+    }
+
+    /// Agent-moved value in `month` (see `this_month`), escrow commitments included.
+    pub fn month_spent(env: Env, month: u32) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MonthSpent(month))
+            .unwrap_or(0)
+    }
+
+    /// The current UTC calendar month as `year * 12 + (month - 1)` — the key every monthly
+    /// figure is stored under, so clients never re-derive the calendar themselves.
+    pub fn this_month(env: Env) -> u32 {
+        month_of(env.ledger().timestamp())
+    }
+
+    /// Fund the treasury from `from`, refusing anything that would take its balance above the
+    /// deposit cap. The cap is the beta's exposure bound while the code is unaudited.
+    ///
+    /// A plain token transfer to the treasury's address does not pass through here — no
+    /// contract can refuse incoming SAC transfers — so the cap binds the app, the factory and
+    /// every client that funds through `deposit`, not a sender determined to go around it.
+    pub fn deposit(env: Env, from: Address, amount: i128) -> Result<(), Error> {
+        from.require_auth();
+        Self::bump_instance(&env);
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        let cap = Self::deposit_cap(env.clone());
+        if cap > 0 && Self::balance(env.clone()) + amount > cap {
+            return Err(Error::ExceedsDepositCap);
+        }
+        let cfg = Self::cfg(&env);
+        token::TokenClient::new(&env, &cfg.token).transfer(
+            &from,
+            env.current_contract_address(),
+            &amount,
+        );
+        env.events().publish((symbol_short!("deposit"), from), amount);
+        Ok(())
+    }
+
+    /// Most this treasury takes in through `deposit` (0 = uncapped). Fixed at deploy.
+    pub fn deposit_cap(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::DepositCap).unwrap_or(0)
+    }
+
+    pub fn version(_env: Env) -> u32 {
+        VERSION
     }
 
     /// The stored session, if any — including an expired one (callers compare
@@ -378,11 +555,13 @@ impl Treasury {
             if s.spent + amount > s.limit {
                 return Err(Error::ExceedsSessionLimit);
             }
+            Self::require_in_task_budget(&env, &to)?;
         }
         let spent_window = Self::rolling_spent(&env);
         if spent_window + amount > cfg.daily_limit {
             return Err(Error::ExceedsDailyLimit);
         }
+        let month = Self::check_month_limits(&env, &to, amount)?;
         let locked = Self::locked(env.clone());
         if Self::balance(env.clone()) - locked < amount {
             return Err(Error::InsufficientFreeBalance);
@@ -392,6 +571,7 @@ impl Treasury {
         // ---- EFFECTS: record the spend BEFORE moving funds (checks-effects-interactions).
         // per-hour buckets enforce the rolling window; per-task is the attribution ledger.
         Self::record_window_spend(&env, amount);
+        Self::record_month_spend(&env, &to, amount, month);
         let task_spent = Self::task_spent(env.clone(), task_id);
         env.storage()
             .persistent()
@@ -518,6 +698,7 @@ impl Treasury {
             if s.spent + amount > s.limit {
                 return Err(Error::ExceedsSessionLimit);
             }
+            Self::require_in_task_budget(&env, &payee)?;
         }
         // The rolling window charges here for the same reason. Enforcing it only at
         // release bounded what the agent could SETTLE while leaving what it could
@@ -530,6 +711,8 @@ impl Treasury {
         if spent_window + amount > cfg.daily_limit {
             return Err(Error::ExceedsDailyLimit);
         }
+        // Monthly limits charge at commitment too, by the same argument.
+        let month = Self::check_month_limits(&env, &payee, amount)?;
         let locked = Self::locked(env.clone());
         if Self::balance(env.clone()) - locked < amount {
             return Err(Error::InsufficientFreeBalance);
@@ -558,6 +741,7 @@ impl Treasury {
         env.storage().instance().set(&DataKey::NextEscrowId, &(id + 1));
         env.storage().instance().set(&DataKey::Locked, &(locked + amount));
         Self::record_window_spend(&env, amount);
+        Self::record_month_spend(&env, &payee, amount, month);
         if let Some(mut s) = session {
             s.spent += amount;
             env.storage().instance().set(&DataKey::Session, &s);
@@ -750,6 +934,45 @@ impl Treasury {
             .set(&DataKey::HourSpent(hour), &(bucket + amount));
     }
 
+    /// A task budget restricts the Leash to the payees it names; a plain Leash names none.
+    fn require_in_task_budget(env: &Env, to: &Address) -> Result<(), Error> {
+        let payees: Option<Vec<Address>> = env.storage().instance().get(&DataKey::SessionPayees);
+        match payees {
+            Some(p) if !p.is_empty() && !p.contains(to) => Err(Error::PayeeOutsideTaskBudget),
+            _ => Ok(()),
+        }
+    }
+
+    /// The payee's monthly cap, then the treasury's monthly limit. Returns the month the
+    /// spend belongs to so the caller records it under the same key it was checked against.
+    fn check_month_limits(env: &Env, to: &Address, amount: i128) -> Result<u32, Error> {
+        let month = month_of(env.ledger().timestamp());
+        let cap = Self::payee_cap(env.clone(), to.clone());
+        if cap > 0 && Self::payee_spent(env.clone(), to.clone(), month) + amount > cap {
+            return Err(Error::ExceedsPayeeCap);
+        }
+        let limit = Self::monthly_limit(env.clone());
+        if limit > 0 && Self::month_spent(env.clone(), month) + amount > limit {
+            return Err(Error::ExceedsMonthlyLimit);
+        }
+        Ok(month)
+    }
+
+    /// Charged whether or not a limit is set today, so a limit set mid-month counts what the
+    /// month already moved instead of starting from zero.
+    fn record_month_spend(env: &Env, to: &Address, amount: i128, month: u32) {
+        let total = DataKey::MonthSpent(month);
+        let per_payee = DataKey::PayeeSpent(to.clone(), month);
+        let store = env.storage().persistent();
+        store.set(&total, &(Self::month_spent(env.clone(), month) + amount));
+        store.set(
+            &per_payee,
+            &(Self::payee_spent(env.clone(), to.clone(), month) + amount),
+        );
+        store.extend_ttl(&total, MONTH_TTL_THRESHOLD, MONTH_TTL_EXTEND_TO);
+        store.extend_ttl(&per_payee, MONTH_TTL_THRESHOLD, MONTH_TTL_EXTEND_TO);
+    }
+
     /// Whether a policy is one the whole system can honour — the single gate used by both
     /// the constructor and `set_limits`, so a treasury cannot be walked past it later.
     ///
@@ -789,4 +1012,21 @@ impl Treasury {
     }
 }
 
+/// The UTC calendar month of a ledger timestamp, as `year * 12 + (month - 1)`.
+///
+/// Howard Hinnant's `civil_from_days`, restricted to non-negative days (ledger time is never
+/// before 1970). Pure integer arithmetic: no host call, no calendar table to keep current.
+pub fn month_of(timestamp: u64) -> u32 {
+    let z = timestamp / SECONDS_PER_DAY + 719_468; // days since 0000-03-01
+    let era = z / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365], March-based
+    let mp = (5 * doy + 2) / 153; // [0, 11], March = 0
+    let month = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    let year = yoe + era * 400 + if month <= 2 { 1 } else { 0 };
+    (year * 12 + (month - 1)) as u32
+}
+
 mod test;
+mod test_v4;

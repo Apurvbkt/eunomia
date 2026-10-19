@@ -9,13 +9,13 @@ use soroban_sdk::{
     vec, Address, BytesN, Env, IntoVal, Symbol,
 };
 
-// The treasury this factory instantiates: the v3.5 wasm the app ships, vendored so the
+// The treasury this factory instantiates: the v4 wasm the app ships, vendored so the
 // test needs no toolchain step (CI runs `cargo test --workspace` alone). The hash check
 // below is what keeps the fixture honest — it must be the code users actually get.
-const TREASURY_WASM: &[u8] = include_bytes!("../fixtures/treasury_v3_5.wasm");
-const TREASURY_V3_5_HASH: [u8; 32] = [
-    0x82, 0x44, 0x72, 0x06, 0x0b, 0x3a, 0xbe, 0xc7, 0xc6, 0xc6, 0x4e, 0x89, 0x85, 0xfa, 0x5d, 0x0c,
-    0x5a, 0x39, 0xea, 0x27, 0x7f, 0xbb, 0x67, 0xea, 0xb3, 0x12, 0x5a, 0x48, 0x3d, 0x05, 0x96, 0x41,
+const TREASURY_WASM: &[u8] = include_bytes!("../fixtures/treasury_v4.wasm");
+const TREASURY_V4_HASH: [u8; 32] = [
+    0xc1, 0x1a, 0x5c, 0x63, 0xe6, 0x10, 0xbe, 0x25, 0x9c, 0xdc, 0xf2, 0x3d, 0x27, 0x6f, 0xdf, 0x6f,
+    0x30, 0x69, 0xfd, 0xc6, 0x06, 0x9c, 0x4d, 0x71, 0x3b, 0x52, 0xd5, 0x56, 0xf2, 0x42, 0x38, 0xec,
 ];
 const REGISTRY_WASM: &[u8] = include_bytes!("../fixtures/treasury_registry.wasm");
 
@@ -49,6 +49,8 @@ struct World<'a> {
 }
 
 const OWNER_START: i128 = 1_000_000_000;
+/// The beta bound the factory under test pins on every treasury.
+const DEPOSIT_CAP: i128 = 500_000_000;
 
 /// Needs `env.mock_all_auths()` first: the mint is admin-signed.
 fn world(env: &Env) -> World<'_> {
@@ -60,11 +62,12 @@ fn world(env: &Env) -> World<'_> {
     let treasury_wasm = env.deployer().upload_contract_wasm(TREASURY_WASM);
     assert_eq!(
         treasury_wasm,
-        BytesN::from_array(env, &TREASURY_V3_5_HASH),
-        "fixture is not the shipped v3.5 treasury"
+        BytesN::from_array(env, &TREASURY_V4_HASH),
+        "fixture is not the shipped v4 treasury"
     );
     let registry = env.register(REGISTRY_WASM, ());
-    let factory_id = env.register(TreasuryFactory, (treasury_wasm, registry.clone()));
+    let factory_id =
+        env.register(TreasuryFactory, (treasury_wasm, registry.clone(), DEPOSIT_CAP));
 
     World {
         env,
@@ -87,7 +90,9 @@ fn setup(w: &World, leash: Option<Leash>, fund: i128, register: bool) -> Setup {
         token: w.token.clone(),
         daily_limit: 1_000_000_000,
         per_task_limit: 100_000_000,
+        monthly_limit: 0,
         payees: vec![w.env, payee],
+        payee_caps: soroban_sdk::Vec::new(w.env),
         leash: leashes,
         fund,
         register,
@@ -185,7 +190,7 @@ fn the_owner_authorises_exactly_one_root_invocation() {
         }
         other => panic!("unexpected root: {:?}", other),
     }
-    // payee, leash, funding transfer, registry — all children of that one root
+    // payee, leash, funding deposit, registry — all children of that one root
     let names: std::vec::Vec<Symbol> = root
         .sub_invocations
         .iter()
@@ -195,7 +200,7 @@ fn the_owner_authorises_exactly_one_root_invocation() {
         })
         .collect();
     assert_eq!(names.len(), 4, "{:?}", names);
-    for expected in ["add_payee", "set_session", "transfer", "register"] {
+    for expected in ["add_payee", "set_session", "deposit", "register"] {
         assert!(names.contains(&Symbol::new(&env, expected)), "missing {expected}");
     }
 }
@@ -270,6 +275,69 @@ fn the_factory_reports_what_it_instantiates() {
     let env = Env::default();
     env.mock_all_auths();
     let w = world(&env);
-    assert_eq!(w.factory.treasury_wasm(), BytesN::from_array(&env, &TREASURY_V3_5_HASH));
+    assert_eq!(w.factory.treasury_wasm(), BytesN::from_array(&env, &TREASURY_V4_HASH));
     assert_eq!(w.factory.registry(), w.registry);
+    assert_eq!(w.factory.deposit_cap(), DEPOSIT_CAP);
+}
+
+// ---- v4 ----------------------------------------------------------------------------
+
+#[test]
+fn every_treasury_is_born_with_the_factory_deposit_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let w = world(&env);
+    let treasury = w.factory.create(&setup(&w, None, 0, false));
+    let cap: i128 = read(&env, &treasury, "deposit_cap", vec![&env]);
+    assert_eq!(cap, DEPOSIT_CAP);
+    let version: u32 = read(&env, &treasury, "version", vec![&env]);
+    assert_eq!(version, 4);
+}
+
+/// Funding above the cap refuses the whole setup — no treasury half-made, nothing moved.
+#[test]
+fn funding_above_the_deposit_cap_aborts_the_creation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let w = world(&env);
+    let s = setup(&w, None, DEPOSIT_CAP + 1, true);
+    assert!(w.factory.try_create(&s).is_err());
+    assert_eq!(w.token_client.balance(&w.owner), OWNER_START);
+    assert_eq!(owned_by(&env, &w.registry, &w.owner).len(), 0);
+
+    let at_cap = w.factory.create(&setup(&w, None, DEPOSIT_CAP, false));
+    assert_eq!(w.token_client.balance(&at_cap), DEPOSIT_CAP);
+}
+
+#[test]
+fn create_sets_the_monthly_budget_and_payee_caps() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let w = world(&env);
+    let mut s = setup(&w, None, 0, false);
+    let float = Address::generate(&env);
+    s.monthly_limit = 2_000_000_000;
+    s.payees.push_back(float.clone());
+    s.payee_caps.push_back(PayeeCap { payee: float.clone(), cap: 50_000_000 });
+
+    let treasury = w.factory.create(&s);
+    // still one owner signature
+    let roots = env.auths().into_iter().filter(|(who, _)| *who == w.owner).count();
+    assert_eq!(roots, 1);
+
+    let monthly: i128 = read(&env, &treasury, "monthly_limit", vec![&env]);
+    assert_eq!(monthly, 2_000_000_000);
+    let cap: i128 = read(&env, &treasury, "payee_cap", vec![&env, float.into_val(&env)]);
+    assert_eq!(cap, 50_000_000);
+}
+
+#[test]
+#[should_panic]
+fn a_negative_monthly_limit_fails_the_whole_creation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let w = world(&env);
+    let mut s = setup(&w, None, 0, false);
+    s.monthly_limit = -1;
+    w.factory.create(&s);
 }

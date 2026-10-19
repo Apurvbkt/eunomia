@@ -26,7 +26,7 @@ fn setup<'a>(
 
     let id = env.register(
         Treasury,
-        (admin, agent, token_addr, daily_limit, per_task_limit),
+        (admin, agent, token_addr, daily_limit, per_task_limit, 0_i128),
     );
     let client = TreasuryClient::new(env, &id);
     token_admin.mint(&id, &500_i128);
@@ -51,7 +51,7 @@ fn constructor_rejects_a_daily_limit_the_circuit_could_never_prove() {
     // One unit past what MAX_BATCH payments of per_task_limit can add up to.
     env.register(
         Treasury,
-        (admin, agent, sac.address(), MAX_BATCH * 100 + 1, 100_i128),
+        (admin, agent, sac.address(), MAX_BATCH * 100 + 1, 100_i128, 0_i128),
     );
 }
 
@@ -105,6 +105,7 @@ fn pay_accounting_and_rejections() {
             token_addr.clone(),
             1000_i128,
             100_i128,
+            0_i128,
         ),
     );
     let client = TreasuryClient::new(&env, &id);
@@ -466,7 +467,7 @@ fn pay_requires_agent_auth() {
 
     let id = env.register(
         Treasury,
-        (admin.clone(), agent, token_addr, 1000_i128, 100_i128),
+        (admin.clone(), agent, token_addr, 1000_i128, 100_i128, 0_i128),
     );
     let client = TreasuryClient::new(&env, &id);
 
@@ -828,7 +829,7 @@ fn session_replaces_root_agent() {
 
     let id = env.register(
         Treasury,
-        (admin.clone(), agent.clone(), token_addr, 1000_i128, 100_i128),
+        (admin.clone(), agent.clone(), token_addr, 1000_i128, 100_i128, 0_i128),
     );
     let client = TreasuryClient::new(&env, &id);
 
@@ -1141,7 +1142,7 @@ fn set_agent_rotates_root() {
 
     let id = env.register(
         Treasury,
-        (admin.clone(), agent.clone(), token_addr, 1000_i128, 100_i128),
+        (admin.clone(), agent.clone(), token_addr, 1000_i128, 100_i128, 0_i128),
     );
     let client = TreasuryClient::new(&env, &id);
 
@@ -1276,7 +1277,7 @@ fn constructor_rejects_per_task_above_daily() {
     let admin = Address::generate(&env);
     let agent = Address::generate(&env);
     let sac = env.register_stellar_asset_contract_v2(admin.clone());
-    env.register(Treasury, (admin, agent, sac.address(), 100_i128, 200_i128));
+    env.register(Treasury, (admin, agent, sac.address(), 100_i128, 200_i128, 0_i128));
 }
 
 // --- v3.2: instance TTL, cancel-vs-session, fail-closed registry ------------------
@@ -1451,7 +1452,7 @@ fn whitelist_root_is_admin_only() {
 
     let id = env.register(
         Treasury,
-        (admin.clone(), agent.clone(), token_addr, 1000_i128, 100_i128),
+        (admin.clone(), agent.clone(), token_addr, 1000_i128, 100_i128, 0_i128),
     );
     let client = TreasuryClient::new(&env, &id);
     let root = BytesN::from_array(&env, &[7_u8; 32]);

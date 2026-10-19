@@ -8,10 +8,14 @@
 //! and the registry require from the owner hangs off that one authorisation tree.
 //!
 //! The factory holds no funds and has no admin. It only knows which treasury code to
-//! instantiate (the wasm hash the app ships) and where the registry is — both fixed at
-//! deploy time, so a factory can never be re-pointed at different code.
+//! instantiate (the wasm hash the app ships), where the registry is and the deposit cap
+//! every treasury it creates carries — all fixed at deploy time, so a factory can never be
+//! re-pointed at different code or loosened after users trusted it.
+//!
+//! v4: the setup also carries the monthly budget and per-payee monthly caps, and funding
+//! goes through the treasury's capped `deposit` rather than a bare transfer.
 use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype, symbol_short, token, Address, BytesN,
+    contract, contractclient, contractimpl, contracttype, symbol_short, Address, BytesN,
     Env, Vec,
 };
 
@@ -24,6 +28,14 @@ pub struct Leash {
     pub limit: i128,
 }
 
+/// A monthly ceiling on what one payee may receive (v4).
+#[contracttype]
+#[derive(Clone)]
+pub struct PayeeCap {
+    pub payee: Address,
+    pub cap: i128,
+}
+
 /// Everything a treasury needs to be useful on the first ledger it exists in.
 #[contracttype]
 #[derive(Clone)]
@@ -34,12 +46,17 @@ pub struct Setup {
     pub token: Address,
     pub daily_limit: i128,
     pub per_task_limit: i128,
+    /// Most the agent may move per UTC calendar month (0 = no monthly limit).
+    pub monthly_limit: i128,
     /// Payees approved from the start (may be empty).
     pub payees: Vec<Address>,
+    /// Monthly caps on individual payees (may be empty). A cap does not approve its payee.
+    pub payee_caps: Vec<PayeeCap>,
     /// Start a Leash for an agent key right away: empty = none, one entry = that agent.
     /// (A `Vec` rather than an `Option`: the SDK's spec cannot carry an optional struct.)
     pub leash: Vec<Leash>,
-    /// Amount of `token` moved from the owner into the treasury (0 = unfunded).
+    /// Amount of `token` deposited from the owner into the treasury (0 = unfunded). Refused
+    /// as a whole if it exceeds the factory's deposit cap.
     pub fund: i128,
     /// Record the treasury under the owner in the registry (cross-device recovery).
     pub register: bool,
@@ -52,6 +69,7 @@ pub struct Setup {
 enum DataKey {
     TreasuryWasm,
     Registry,
+    DepositCap,
 }
 
 /// The slice of the treasury interface the factory drives. Both calls are admin-only on
@@ -60,6 +78,9 @@ enum DataKey {
 pub trait TreasuryApi {
     fn add_payee(env: Env, payee: Address);
     fn set_session(env: Env, agent: Address, valid_until: u64, limit: i128);
+    fn set_monthly_limit(env: Env, limit: i128);
+    fn set_payee_cap(env: Env, payee: Address, cap: i128);
+    fn deposit(env: Env, from: Address, amount: i128);
 }
 
 #[contractclient(name = "RegistryClient")]
@@ -72,13 +93,23 @@ pub struct TreasuryFactory;
 
 #[contractimpl]
 impl TreasuryFactory {
-    /// Pins the treasury code and the registry. Immutable after deploy (no setters): a
-    /// factory that could be re-pointed would be a way to hand users different code.
-    pub fn __constructor(env: Env, treasury_wasm: BytesN<32>, registry: Address) {
+    /// Pins the treasury code, the registry and the deposit cap. Immutable after deploy (no
+    /// setters): a factory that could be re-pointed would be a way to hand users different
+    /// code, and one whose cap could be raised would make the beta bound a promise only.
+    pub fn __constructor(env: Env, treasury_wasm: BytesN<32>, registry: Address, deposit_cap: i128) {
+        if deposit_cap < 0 {
+            panic!("deposit cap must not be negative");
+        }
         env.storage()
             .instance()
             .set(&DataKey::TreasuryWasm, &treasury_wasm);
         env.storage().instance().set(&DataKey::Registry, &registry);
+        env.storage().instance().set(&DataKey::DepositCap, &deposit_cap);
+    }
+
+    /// The deposit cap every treasury from this factory is born with (0 = uncapped).
+    pub fn deposit_cap(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::DepositCap).unwrap_or(0)
     }
 
     pub fn treasury_wasm(env: Env) -> BytesN<32> {
@@ -101,6 +132,7 @@ impl TreasuryFactory {
         }
         let wasm: BytesN<32> = env.storage().instance().get(&DataKey::TreasuryWasm).unwrap();
         let registry: Address = env.storage().instance().get(&DataKey::Registry).unwrap();
+        let deposit_cap: i128 = env.storage().instance().get(&DataKey::DepositCap).unwrap_or(0);
 
         // 1. The treasury: constructor validates the policy (InvalidLimits aborts here).
         let treasury = env.deployer().with_current_contract(s.salt.clone()).deploy_v2(
@@ -111,13 +143,20 @@ impl TreasuryFactory {
                 s.token.clone(),
                 s.daily_limit,
                 s.per_task_limit,
+                deposit_cap,
             ),
         );
         let t = TreasuryClient::new(&env, &treasury);
 
-        // 2. Approved payees.
+        // 2. Approved payees, their caps, and the monthly budget.
         for payee in s.payees.iter() {
             t.add_payee(&payee);
+        }
+        for c in s.payee_caps.iter() {
+            t.set_payee_cap(&c.payee, &c.cap);
+        }
+        if s.monthly_limit != 0 {
+            t.set_monthly_limit(&s.monthly_limit);
         }
 
         // 3. The Leash (an agent key the owner already holds the public half of).
@@ -125,9 +164,10 @@ impl TreasuryFactory {
             t.set_session(&l.agent, &l.valid_until, &l.limit);
         }
 
-        // 4. Funding, straight from the owner — the treasury never touches the owner's key.
+        // 4. Funding, straight from the owner through the capped deposit — the treasury never
+        //    touches the owner's key; the owner's signature covers the transfer inside it.
         if s.fund > 0 {
-            token::TokenClient::new(&env, &s.token).transfer(&s.owner, &treasury, &s.fund);
+            t.deposit(&s.owner, &s.fund);
         }
 
         // 5. Cross-device discovery.
