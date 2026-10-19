@@ -1,0 +1,42 @@
+name: Publish eunomia-mcp
+
+# A tag `mcp-v<version>` publishes packages/mcp to npm with provenance: the package page
+# links the exact commit and workflow run that built it, signed through Sigstore. Nothing
+# is published from a laptop any more.
+#
+# One-time setup on npmjs.com (the package owner): eunomia-mcp → Settings → Trusted
+# publishing → GitHub Actions, repository eunomia-finance/eunomia, workflow publish-mcp.yml.
+# With that in place no token is stored anywhere. Until then an NPM_TOKEN secret works too.
+on:
+  push:
+    tags: ["mcp-v*"]
+
+permissions:
+  contents: read
+  id-token: write # OIDC: trusted publishing and the provenance signature
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/mcp
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5 or newer.
+      - run: npm install -g npm@11
+      - name: Tag matches package version
+        run: |
+          want="mcp-v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json ($want)"; exit 1
+          fi
+      - run: npm install
+      # prepublishOnly runs the binding and codec sync checks, the tests and the build.
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

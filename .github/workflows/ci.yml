@@ -104,6 +104,9 @@ jobs:
       # The dashboard decodes exception requests with a verbatim copy of the codec.
       - name: mcp — exception codec copy in web in sync
         run: cmp packages/mcp/src/exceptionCodec.ts web/src/lib/exceptionCodec.ts
+      # …and the budget request links the agent signs, read by the Agent page.
+      - name: mcp — budget request codec copy in web in sync
+        run: cmp packages/mcp/src/budgetRequestCodec.ts web/src/lib/budgetRequestCodec.ts
       - name: mcp — unit tests + build
         working-directory: packages/mcp
         run: |
