@@ -39,3 +39,6 @@ test-results/
 public/docs/
 
 docs-site/.vitepress/cache/
+
+# wrangler local state
+.wrangler

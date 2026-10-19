@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The app on Cloudflare (SOW 2: Vercel → Cloudflare). Static assets plus worker/index.ts
+  // for /api/relay and /api/faucet. Build first: npm run build, then wrangler deploy.
+  "name": "eunomia-app",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  // stellar-sdk decodes XDR with Buffer
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // Per client IP, per Cloudflare location. The relay pays a fee for every call it admits.
+  "ratelimits": [
+    { "name": "RELAY_LIMITER", "namespace_id": "4401", "simple": { "limit": 20, "period": 60 } }
+  ],
+  "vars": {
+    "RELAY_NETWORK": "testnet"
+  },
+  // secrets: DISPENSER_SECRET (testnet fee + faucet key) or RELAY_SECRET (wrangler secret put …)
+  "observability": { "enabled": true }
+}

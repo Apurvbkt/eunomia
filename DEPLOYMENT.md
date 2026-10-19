@@ -369,6 +369,34 @@ Why a float and not the treasury paying the 402 itself: [`docs/MPP-DIRECT-SETTLE
 The app creates through the v4 factory; the relay keeps admitting the v3.5 factory and wasm
 (`LEGACY_TREASURY_*` in `web/src/lib/treasuryWasm.ts`), so earlier treasuries keep working.
 
+## Cloudflare — the app and its relay off Vercel (2026-10-19, preview)
+
+`web/wrangler.jsonc` + `web/worker/index.ts`: the built app as Workers static assets, and
+`/api/relay` and `/api/faucet` handled by the same host-neutral handlers Vercel's `api/*` call
+(`src/lib/relayHandler.ts`, `src/lib/faucetHandler.ts`). Deploy: `npm run deploy:cf`.
+
+- **Relay per network.** `RELAY_NETWORK=testnet` (default) admits native-XLM moves, the
+  factories and our treasury wasm. `pubnet` admits only `RELAY_FACTORY_ID` and the treasury
+  wasm — no native XLM (a v4 treasury is funded through `deposit`) — needs `RELAY_RPC_URL`,
+  and refuses to sponsor anything without the rate limiter bound.
+- **Rate limit.** `RELAY_LIMITER`: 20 requests a minute per client IP per Cloudflare location.
+  Cloudflare documents it as permissive and eventually consistent; a 120-request burst
+  returned 10 × 429. The real bounds stay admission (only our contracts) and a fee account
+  kept small.
+- **Strict CSP** (`scripts/headers.mjs` → `dist/_headers`): `script-src 'self'` plus the hash
+  of every inline script in the build (the docs' page-hash map changes with the docs, so the
+  hashes are computed after `vite build`, CRLF-normalised the way the browser parses them),
+  `connect-src` limited to Stellar, Supabase, WalletConnect, the anchor and the analytics
+  beacon, `frame-ancestors 'none'`. Probed with Chromium across the landing, app pages,
+  wallet modal and docs: no violations.
+
+| Item | Value |
+|---|---|
+| Preview | https://eunomia-app.l3ekirerdem.workers.dev (passkeys stay on eunomia.finance: rp.id) |
+| A relayed call through the worker, confirmed on the ledger | [`9f89402c…10e0`](https://stellar.expert/explorer/testnet/tx/9f89402c9dd96d2bb74e3863b4352d6536aa16b8b04b287e8004fdf74f6b10e0) |
+
+Moving eunomia.finance itself is a DNS change (Porkbun → Cloudflare) and the last step.
+
 ## Anchor leg — the USDC a TRY-funded treasury holds
 
 A treasury funded with TRY through the SEP-6 anchor (`tr-mock-anchor.fly.dev`) holds the anchor's

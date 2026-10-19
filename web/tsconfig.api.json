@@ -22,5 +22,5 @@
     "noFallthroughCasesInSwitch": true
   },
   /* The guards live in src/ and are shared with the app; they are type-checked here too. */
-  "include": ["api", "src/lib/hostFunction.ts", "src/lib/relayGuard.ts"]
+  "include": ["api", "worker", "src/lib/hostFunction.ts", "src/lib/relayGuard.ts"]
 }

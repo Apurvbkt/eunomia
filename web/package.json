@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run docs:build && tsc -b && npm run check:api-types && vite build && npm run check:no-secrets",
+    "build": "npm run docs:build && tsc -b && npm run check:api-types && vite build && node scripts/headers.mjs && npm run check:no-secrets",
     "check:no-secrets": "node scripts/check-no-secrets.mjs",
     "check:api-types": "tsc --noEmit --ignoreConfig --module nodenext --moduleResolution nodenext --target es2022 --skipLibCheck --types node api/relay.ts api/faucet.ts",
     "docs:dev": "vitepress dev docs-site",
@@ -16,7 +16,8 @@
     "test:e2e": "playwright test",
     "test:live": "playwright test --config playwright.live.config.ts",
     "test:e2e:install": "playwright install --with-deps chromium",
-    "users": "node scripts/user-count.mjs"
+    "users": "node scripts/user-count.mjs",
+    "deploy:cf": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "@creit.tech/stellar-wallets-kit": "^2.3.0",

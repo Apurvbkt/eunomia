@@ -23,7 +23,7 @@ const test = base.extend<{ eunomia: EunomiaPage; signer: ReturnType<typeof getTe
   },
 });
 
-test("the owner approves an agent's budget request with one signature", async ({ eunomia, signer }) => {
+test("the owner approves an agent's budget request with one signature", async ({ eunomia }) => {
   test.info().annotations.push({ type: "network", description: "Stellar testnet" });
   const page = eunomia.page;
   const pageErrors: string[] = [];
