@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { relayTx } from "./relayer";
+import { ledgerConfirm, relayHostFunction, relayTx, RelayPendingError } from "./relayer";
 
 const b64 = (s: string) => ({ toXDR: () => s });
 
@@ -14,7 +14,7 @@ const respond = (ok: boolean, status: number, body: unknown) =>
 
 describe("relayTx", () => {
   it("posts the decoded func and auth entries to our own relay endpoint", async () => {
-    const fetchImpl = respond(true, 200, { hash: "abc123", status: "confirmed" });
+    const fetchImpl = respond(true, 200, { hash: "abc123", status: "SUCCESS" });
 
     await expect(relayTx(fetchImpl, assembled())).resolves.toEqual({ hash: "abc123" });
 
@@ -25,7 +25,7 @@ describe("relayTx", () => {
   });
 
   it("sends an empty auth list rather than failing when there are no entries", async () => {
-    const fetchImpl = respond(true, 200, { hash: "h" });
+    const fetchImpl = respond(true, 200, { hash: "h", status: "SUCCESS" });
     await relayTx(fetchImpl, assembled([]));
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body).auth).toEqual([]);
   });
@@ -36,7 +36,7 @@ describe("relayTx", () => {
   });
 
   it("fails clearly when the transaction was never built", async () => {
-    const fetchImpl = respond(true, 200, { hash: "h" });
+    const fetchImpl = respond(true, 200, { hash: "h", status: "SUCCESS" });
     await expect(relayTx(fetchImpl, { signAndSend: vi.fn() })).rejects.toThrow(/could not be prepared/i);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -62,5 +62,72 @@ describe("relayTx", () => {
   it("still asks for a retry on a genuinely transient failure", async () => {
     const fetchImpl = respond(false, 502, { error: "Relay failed." });
     await expect(relayTx(fetchImpl, assembled())).rejects.toThrow(/try again/i);
+  });
+});
+
+// The 08-07 failure: the relay answered 200 for a transaction the ledger never confirmed, the
+// caller ignored the status, and the app announced a treasury that did not exist.
+describe("a 200 from the relay is not a success until the ledger says so", () => {
+  it("does not resolve on a pending answer when nothing confirms it", async () => {
+    const fetchImpl = respond(true, 200, { hash: "h1", status: "PENDING" });
+    await expect(relayHostFunction(fetchImpl, "F", [])).rejects.toBeInstanceOf(RelayPendingError);
+  });
+
+  it("does not resolve when the relay omits the status", async () => {
+    const fetchImpl = respond(true, 200, { hash: "h1" });
+    await expect(relayHostFunction(fetchImpl, "F", [])).rejects.toBeInstanceOf(RelayPendingError);
+  });
+
+  it("asks the ledger and resolves once it reports SUCCESS", async () => {
+    const fetchImpl = respond(true, 200, { hash: "h1", status: "NOT_FOUND" });
+    const confirm = vi.fn().mockResolvedValue("SUCCESS");
+    await expect(relayHostFunction(fetchImpl, "F", [], confirm)).resolves.toEqual({ hash: "h1" });
+    expect(confirm).toHaveBeenCalledWith("h1");
+  });
+
+  it("does not ask the ledger again when the relay already saw SUCCESS", async () => {
+    const confirm = vi.fn();
+    await relayHostFunction(respond(true, 200, { hash: "h1", status: "SUCCESS" }), "F", [], confirm);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed transaction as failed, not as pending", async () => {
+    const fetchImpl = respond(true, 200, { hash: "h1", status: "PENDING" });
+    const err = await relayHostFunction(fetchImpl, "F", [], async () => "FAILED").catch((e) => e);
+    expect(err).not.toBeInstanceOf(RelayPendingError);
+    expect(String(err)).toMatch(/failed/i);
+  });
+
+  it("carries the hash when the ledger is still silent, so the UI can link it", async () => {
+    const fetchImpl = respond(true, 200, { hash: "h1", status: "PENDING" });
+    const err = await relayHostFunction(fetchImpl, "F", [], async () => "NOT_FOUND").catch((e) => e);
+    expect(err).toBeInstanceOf(RelayPendingError);
+    expect((err as RelayPendingError).hash).toBe("h1");
+  });
+
+  it("treats a 200 without a hash as a failure", async () => {
+    await expect(relayHostFunction(respond(true, 200, { status: "SUCCESS" }), "F", [])).rejects.toThrow(
+      /try again/i,
+    );
+  });
+});
+
+describe("ledgerConfirm", () => {
+  const noWait = () => Promise.resolve();
+
+  it("polls past NOT_FOUND and PENDING to the final status", async () => {
+    const getTransaction = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "NOT_FOUND" })
+      .mockResolvedValueOnce({ status: "PENDING" })
+      .mockResolvedValueOnce({ status: "SUCCESS" });
+    await expect(ledgerConfirm({ getTransaction }, 5, noWait)("h")).resolves.toBe("SUCCESS");
+    expect(getTransaction).toHaveBeenCalledTimes(3);
+  });
+
+  it("gives up after its attempts and reports what it last saw", async () => {
+    const getTransaction = vi.fn().mockResolvedValue({ status: "NOT_FOUND" });
+    await expect(ledgerConfirm({ getTransaction }, 3, noWait)("h")).resolves.toBe("NOT_FOUND");
+    expect(getTransaction).toHaveBeenCalledTimes(3);
   });
 });

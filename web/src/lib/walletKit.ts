@@ -35,9 +35,11 @@ import {
 } from "./passkeySession";
 import {
   relayEnvelope,
+  ledgerConfirm,
   relayHostFunction,
   relayTx,
   type AssembledLike,
+  type Confirm,
   type FetchLike,
 } from "./relayer";
 import {
@@ -160,6 +162,10 @@ const PASSKEY_ID = "passkey";
 const KEY_ID_KEY = "prism_passkey_key_id";
 
 const local = (): KV | undefined => (typeof localStorage !== "undefined" ? localStorage : undefined);
+
+/** Every relayed submission waits for the ledger's own verdict before it resolves — the relay's
+ *  200 only means it handed the transaction over. See relayer.ts. */
+const onLedger = (): Confirm => ledgerConfirm(new rpc.Server(RPC_URL));
 
 /** Seed this tab's session from the device's remembered passkey session. A returning
  *  passkey user used to land on a blank page and — with only a "create" button in sight —
@@ -322,7 +328,7 @@ export async function connectPasskey(
     if (mode === "create") {
       const created = await wallet.create(userLabel);
       ({ contractId, keyId } = created);
-      await relayEnvelope(fetch as unknown as FetchLike, created.signedTx);
+      await relayEnvelope(fetch as unknown as FetchLike, created.signedTx, onLedger());
     } else {
       // Sign in: the authenticator asks the user to pick a passkey; the kit derives the
       // wallet from it, and the device's wallet memory covers recovered wallets.
@@ -351,7 +357,7 @@ async function recoveryDeps(): Promise<RecoveryDeps> {
   const wallet = makePasskeyWallet(await realPasskeyBackend(), "Eunomia");
   return {
     wallet,
-    relayTx: (tx) => relayTx(fetch as unknown as FetchLike, tx as AssembledLike),
+    relayTx: (tx) => relayTx(fetch as unknown as FetchLike, tx as AssembledLike, onLedger()),
   };
 }
 
@@ -413,13 +419,13 @@ export async function executorFor(address: string): Promise<TxExecutor> {
       networkPassphrase: NETWORK_PASSPHRASE,
       simulationSource: ADMIN,
       signAuthEntry: (entry) => wallet.signAuthEntry(entry),
-      relay: (func, auth) => relayHostFunction(fetch as unknown as FetchLike, func, auth),
+      relay: (func, auth) => relayHostFunction(fetch as unknown as FetchLike, func, auth, onLedger()),
     };
 
     return makePasskeyExecutor(
       address,
       wallet,
-      (tx) => relayTx(fetch as unknown as FetchLike, tx as AssembledLike),
+      (tx) => relayTx(fetch as unknown as FetchLike, tx as AssembledLike, onLedger()),
       (wasmHash, constructorArgs) =>
         deployFromSmartWallet(asWallet, address, wasmHash, constructorArgs),
       (to, amountStroops) =>
