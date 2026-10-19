@@ -76,6 +76,7 @@ const request = (over: Partial<BudgetRequest> = {}): BudgetRequest => ({
   hours: 24,
   payees: [ROZO_PAY_TO],
   task: "Research three suppliers and summarise prices",
+  expires: 1_900_000_000,
   ...over,
 });
 
@@ -190,6 +191,7 @@ const deps = (fetchImpl: typeof fetch, over: Record<string, unknown> = {}) => ({
   readClient: readClient(over),
   floatBalance: async () => 1_000_000n,
   sign: async () => ({ "PAYMENT-SIGNATURE": "signed" }),
+  resolve: async () => ["93.184.216.34"], // a public address; no DNS in tests
 });
 
 test("call_service pays an approved payee within every bound and returns the answer", async () => {
@@ -272,4 +274,35 @@ test("of several acceptable options the cheapest is the one signed", async () =>
   });
   assert.equal(picked, "90000");
   assert.ok(!("refused" in out) && out.paid);
+});
+
+// ---- where call_service may go -------------------------------------------------------
+
+test("on mainnet only https to a public host is called", async () => {
+  const { urlProblem, isPrivateAddress } = await import("./call.js");
+  const publicHost = async () => ["104.18.1.1"];
+  assert.equal(await urlProblem("https://apiserver.mpprouter.dev/v1/x", "pubnet", publicHost), null);
+  assert.match((await urlProblem("http://apiserver.mpprouter.dev/v1/x", "pubnet", publicHost)) ?? "", /https only/);
+  assert.match((await urlProblem("https://169.254.169.254/latest/meta-data", "pubnet", publicHost)) ?? "", /private/);
+  assert.match((await urlProblem("https://localhost:8080/", "pubnet", publicHost)) ?? "", /local/);
+  assert.match((await urlProblem("https://evil.example/", "pubnet", async () => ["10.0.0.5"])) ?? "", /private/);
+  assert.match((await urlProblem("https://[::1]/", "pubnet", publicHost)) ?? "", /private/);
+  assert.match((await urlProblem("file:///etc/passwd", "pubnet", publicHost)) ?? "", /not allowed/);
+  // testnet keeps local sellers reachable for development
+  assert.equal(await urlProblem("http://127.0.0.1:4021/search", "testnet", publicHost), null);
+  assert.ok(isPrivateAddress("192.168.1.10") && isPrivateAddress("100.64.0.1") && isPrivateAddress("::ffff:127.0.0.1"));
+  assert.ok(!isPrivateAddress("8.8.8.8"));
+});
+
+test("call_service refuses a private target before any request is made", async () => {
+  let called = false;
+  const fetchImpl = (async () => {
+    called = true;
+    return new Response("{}");
+  }) as unknown as typeof fetch;
+  await assert.rejects(
+    callService(ctx(), { url: "https://metadata.internal/", maxPrice: 1n }, { ...deps(fetchImpl), resolve: async () => ["169.254.169.254"] }),
+    /refusing to call/,
+  );
+  assert.equal(called, false);
 });

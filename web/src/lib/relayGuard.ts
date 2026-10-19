@@ -5,7 +5,7 @@
 // and Vercel compiles api/* with node16 resolution, where an extensionless relative import
 // does not resolve and the function dies at cold start with a 500. `npm run check:api-types`
 // guards it. (Vite and vitest map the .js back to this .ts, so the bundle is unaffected.)
-import type { xdr } from "@stellar/stellar-sdk";
+import { Address, type xdr } from "@stellar/stellar-sdk";
 import { LEGACY_TREASURY_WASM_HASHES, TREASURY_WASM_HASH } from "./treasuryWasm.js";
 
 /** Soroban contract ids are StrKey-encoded, start with `C`, and are 56 characters long. */
@@ -74,15 +74,28 @@ export async function isRelayAllowed(
   return cfg.wasmHashes.some((h) => h.toLowerCase() === seen);
 }
 
+/** Credential kinds a relayed call may carry: address-bound ones, signed by the address they
+ *  name. An allowlist, not a denylist — a credential kind the protocol adds later (delegates
+ *  already exist) is refused until someone decides it is safe here. */
+const ADDRESS_CREDENTIALS = new Set(["sorobanCredentialsAddress", "sorobanCredentialsAddressV2"]);
+
 /** Whether caller-supplied auth entries are safe to submit with the relay as the source.
  *
  *  The relay sources and signs the transaction, so a `sourceAccount` credential is
  *  satisfied by the relay's own signature: it authorises as the fee account, not the user.
  *  Admitted alongside the native SAC, one such entry on `transfer(from = relay, ...)` would
  *  hand anyone the dispenser's balance. Genuine passkey calls always carry address-bound
- *  credentials signed by the user's wallet, so nothing legitimate is refused. */
-export function authEntriesAreSafe(entries: xdr.SorobanAuthorizationEntry[]): boolean {
-  return entries.every(
-    (entry) => entry.credentials().switch().name !== "sorobanCredentialsSourceAccount",
-  );
+ *  credentials signed by the user's wallet, so nothing legitimate is refused.
+ *
+ *  `relayAddress`, when given, may never be the address an entry authorises as: the relay
+ *  key signs for fees only. */
+export function authEntriesAreSafe(entries: xdr.SorobanAuthorizationEntry[], relayAddress?: string): boolean {
+  return entries.every((entry) => {
+    const creds = entry.credentials();
+    const kind = creds.switch().name;
+    if (!ADDRESS_CREDENTIALS.has(kind)) return false;
+    if (!relayAddress) return true;
+    const addr = kind === "sorobanCredentialsAddress" ? creds.address().address() : creds.addressV2().address();
+    return Address.fromScAddress(addr).toString() !== relayAddress;
+  });
 }

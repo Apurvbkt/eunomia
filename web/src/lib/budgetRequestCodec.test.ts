@@ -14,6 +14,7 @@ describe("budget request link", () => {
     hours: 6,
     payees: ["GDOMW4C36BUBBFJW3V4L22LUICOUKFVTPGOYU6UMZZ6D3ENEOCH4QCRT"],
     task: "Find three flights under 400 euros",
+    expires: 1_900_000_000,
   };
 
   it("reads back a link the agent signed, from the page's query string", () => {
@@ -21,6 +22,14 @@ describe("budget request link", () => {
     const back = decodeBudgetRequest(url.searchParams);
     expect(back.verified).toBe(true);
     expect(back.request).toEqual(request);
+  });
+
+  it("refuses an expired link even though its signature holds", () => {
+    const params = encodeBudgetRequest(request, agent);
+    expect(decodeBudgetRequest(params, 1_899_999_999).verified).toBe(true);
+    const late = decodeBudgetRequest(params, 1_900_000_000);
+    expect(late.verified).toBe(false);
+    expect(late.problems.join()).toMatch(/expired/);
   });
 
   it("refuses a link whose task text was changed on the way", () => {

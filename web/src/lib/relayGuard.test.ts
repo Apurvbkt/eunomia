@@ -158,4 +158,34 @@ describe("authEntriesAreSafe", () => {
     expect(authEntriesAreSafe([asRelay])).toBe(false);
     expect(authEntriesAreSafe([addressEntry, asRelay])).toBe(false);
   });
+
+  it("refuses credential kinds it was not told are safe — delegates included", () => {
+    const delegated = new xdr.SorobanAuthorizationEntry({
+      credentials: xdr.SorobanCredentials.sorobanCredentialsAddressWithDelegates(
+        new xdr.SorobanAddressCredentialsWithDelegates({
+          addressCredentials: addressEntry.credentials().address(),
+          delegates: [],
+        }),
+      ),
+      rootInvocation: invocation,
+    });
+    expect(authEntriesAreSafe([delegated])).toBe(false);
+  });
+
+  it("refuses an entry that authorises as the relay's own address", () => {
+    const relay = "GBRSNTFGXF3V4NJ27ZGTKGPR7VKZB43SEBFKZACAHMIEGLTS4LYZMFQX";
+    const asRelayAddress = new xdr.SorobanAuthorizationEntry({
+      credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+        new xdr.SorobanAddressCredentials({
+          address: new Address(relay).toScAddress(),
+          nonce: xdr.Int64.fromString("1"),
+          signatureExpirationLedger: 100,
+          signature: xdr.ScVal.scvVoid(),
+        }),
+      ),
+      rootInvocation: invocation,
+    });
+    expect(authEntriesAreSafe([asRelayAddress], relay)).toBe(false);
+    expect(authEntriesAreSafe([addressEntry], relay)).toBe(true);
+  });
 });

@@ -17,7 +17,7 @@ import { Keypair, rpc, xdr } from "@stellar/stellar-sdk";
 import { classifyHostFunction, hostFunctionFromEnvelope } from "./hostFunction.js";
 import { allowedWasmHashes, authEntriesAreSafe, isRelayAllowed } from "./relayGuard.js";
 import { submitEnvelope, submitHostFunction } from "./relaySubmit.js";
-import { LEGACY_TREASURY_FACTORY_IDS, TREASURY_FACTORY_ID } from "./treasuryWasm.js";
+import { LEGACY_TREASURY_FACTORY_IDS, TREASURY_FACTORY_ID, TREASURY_WASM_HASH } from "./treasuryWasm.js";
 
 export interface RelayEnv {
   /** testnet (default) | pubnet */
@@ -146,7 +146,12 @@ export async function handleRelay(req: Request, env: RelayEnv, limiter?: RateLim
   const isEnvelope = typeof envelope === "string" && envelope.length > 0;
   if (!isFuncCall && !isEnvelope) return json({ error: "Malformed request." }, 400);
 
-  const wasmHashes = allowedWasmHashes(clean(env.RELAY_ALLOWED_WASM));
+  // Testnet carries every treasury version this app ever deployed there; mainnet starts at v4
+  // and admits exactly what its env names besides it — no testnet-era code.
+  const wasmHashes =
+    net.name === "pubnet"
+      ? [...new Set([...csv(env.RELAY_ALLOWED_WASM), TREASURY_WASM_HASH])]
+      : allowedWasmHashes(clean(env.RELAY_ALLOWED_WASM));
   const readWasmHash = async (contractId: string): Promise<string | null> => {
     const entry = await new rpc.Server(net.rpcUrl).getContractData(
       contractId,
@@ -181,7 +186,7 @@ export async function handleRelay(req: Request, env: RelayEnv, limiter?: RateLim
     } catch {
       return json({ error: "Malformed request." }, 400);
     }
-    if (!authEntriesAreSafe(entries)) return json({ error: "Not allowed." }, 403);
+    if (!authEntriesAreSafe(entries, keypair.publicKey())) return json({ error: "Not allowed." }, 403);
   }
 
   try {

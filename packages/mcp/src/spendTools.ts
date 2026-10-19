@@ -3,7 +3,7 @@
 // the work needs one. Registered alongside the treasury tools in tools.ts.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { encodeBudgetRequest, MAX_REQUEST_HOURS, MAX_REQUEST_PAYEES } from "./budgetRequestCodec.js";
+import { encodeBudgetRequest, MAX_REQUEST_HOURS, MAX_REQUEST_PAYEES, REQUEST_TTL_SEC } from "./budgetRequestCodec.js";
 import { callService } from "./call.js";
 import { searchServices } from "./catalog.js";
 import { isValidContractId } from "./credential.js";
@@ -221,6 +221,7 @@ export function registerSpendTools(server: McpServer, ctx: ServerContext): void 
           hours,
           payees,
           task,
+          expires: now() + REQUEST_TTL_SEC,
         };
         const params = encodeBudgetRequest(request, agentKeypair(ctx.credential!));
         // The app routes by hash; the request rides in the query and opens on the Agent page.
@@ -228,9 +229,11 @@ export function registerSpendTools(server: McpServer, ctx: ServerContext): void 
         return ok({
           requested: true,
           approvalUrl,
+          agentPublicKey: request.agent,
           request: { ...request, limit: amount, unit: await treasuryUnit(ctx.net, ctx.treasuryId!) },
+          expiresAt: new Date(request.expires * 1000).toISOString(),
           howOwnerApproves:
-            "Give the owner this link. It opens their Eunomia app on an approval page showing the amount, duration, payees and task; one passkey signature starts the budget.",
+            "Give the owner this link and this agent's public key (agentPublicKey). The app shows the amount, duration, payees and task; for a key it has not seen on this treasury it asks the owner to paste the key first. One signature starts the budget. The link expires in 24 hours.",
           checkWith: "check_budget",
         });
       } catch (e) {

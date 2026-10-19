@@ -4,19 +4,23 @@
 //
 // The agent signs the request with its Leash key, so a link edited on the way (a bigger
 // limit, an extra payee, a longer window) no longer verifies. That proves which key asked,
-// not that the asker deserves it: the app still shows the owner whose key it is and whether
-// it has worked for this treasury before.
+// not that the asker deserves it: anyone can sign a request with a key of their own. The app
+// therefore approves an unfamiliar key only after the owner pastes the key their own agent
+// printed (see BudgetRequestCard).
 //
 // This file is copied verbatim into web/src/lib/budgetRequestCodec.ts (CI keeps the two
 // byte-identical) — keep it browser-safe.
 import { Keypair, StrKey } from "@stellar/stellar-sdk";
 
-export const BUDGET_REQUEST_VERSION = "1";
+// v2 (2026-10-20): the request expires. A v1 link, once made, could be presented forever.
+export const BUDGET_REQUEST_VERSION = "2";
 /** A task budget names at most this many payees (the contract's MAX_TASK_PAYEES). */
 export const MAX_REQUEST_PAYEES = 16;
 /** Longest budget an agent may ask for: 30 days. Longer work is a standing Leash. */
 export const MAX_REQUEST_HOURS = 720;
 export const MAX_TASK_CHARS = 200;
+/** How long a request link stays approvable. */
+export const REQUEST_TTL_SEC = 24 * 3600;
 
 export interface BudgetRequest {
   network: "testnet" | "pubnet";
@@ -28,6 +32,8 @@ export interface BudgetRequest {
   payees: string[];
   /** what the budget is for, in the agent's words */
   task: string;
+  /** unix seconds after which the link no longer approves anything */
+  expires: number;
 }
 
 const isAddress = (a: string) => StrKey.isValidEd25519PublicKey(a) || StrKey.isValidContract(a);
@@ -48,6 +54,7 @@ export function budgetRequestProblems(r: BudgetRequest): string[] {
   for (const payee of r.payees) if (!isAddress(payee)) p.push(`payee ${payee} is not a Stellar address`);
   if (new Set(r.payees).size !== r.payees.length) p.push("payees repeat");
   if (r.task.length === 0 || r.task.length > MAX_TASK_CHARS) p.push(`task must be 1 to ${MAX_TASK_CHARS} characters`);
+  if (!Number.isInteger(r.expires) || r.expires <= 0) p.push("expires must be a unix time");
   return p;
 }
 
@@ -63,6 +70,7 @@ export function budgetRequestMessage(r: BudgetRequest): Buffer {
       String(r.hours),
       r.payees.join(","),
       r.task,
+      String(r.expires),
     ].join("\n"),
     "utf8",
   );
@@ -82,14 +90,17 @@ export function encodeBudgetRequest(r: BudgetRequest, agent: Keypair): URLSearch
     h: String(r.hours),
     p: r.payees.join(","),
     task: r.task,
+    exp: String(r.expires),
     sig: agent.sign(budgetRequestMessage(r)).toString("base64"),
   });
 }
 
 /** Read a request back from link parameters. `verified` is true only when every field is
- *  well-formed and the agent's signature covers them all. */
+ *  well-formed, the agent's signature covers them all and — given `nowSec` — the link has
+ *  not expired. */
 export function decodeBudgetRequest(
   params: URLSearchParams,
+  nowSec?: number,
 ): { request: BudgetRequest | null; verified: boolean; problems: string[] } {
   if (params.get("v") !== BUDGET_REQUEST_VERSION) {
     return { request: null, verified: false, problems: [`unsupported request version "${params.get("v")}"`] };
@@ -103,11 +114,17 @@ export function decodeBudgetRequest(
     hours: Number(params.get("h") ?? ""),
     payees: (params.get("p") ?? "").split(",").filter(Boolean),
     task: params.get("task") ?? "",
+    expires: Number(params.get("exp") ?? ""),
   };
   const problems = budgetRequestProblems(request);
   if (problems.length > 0) return { request, verified: false, problems };
-  const verified = signatureHolds(request, params.get("sig") ?? "");
-  return { request, verified, problems: verified ? [] : ["the agent's signature does not match this request"] };
+  if (!signatureHolds(request, params.get("sig") ?? "")) {
+    return { request, verified: false, problems: ["the agent's signature does not match this request"] };
+  }
+  if (nowSec !== undefined && request.expires <= nowSec) {
+    return { request, verified: false, problems: ["this request has expired — ask the agent for a new link"] };
+  }
+  return { request, verified: true, problems: [] };
 }
 
 function signatureHolds(r: BudgetRequest, sig: string): boolean {

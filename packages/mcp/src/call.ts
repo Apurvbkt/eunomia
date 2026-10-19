@@ -9,6 +9,8 @@
 //   - paid to an address the treasury approves (is_payee), and inside the task budget's
 //     payee list when the Leash has one
 // An option that fails any of them is never offered to the signer.
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { x402Client, x402HTTPClient } from "@x402/core/client";
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
@@ -53,6 +55,8 @@ export interface CallDeps {
   fetchImpl?: typeof fetch;
   /** the float's balance of the treasury token; injected for tests */
   floatBalance?: () => Promise<bigint>;
+  /** resolves a host to its addresses; injected for tests */
+  resolve?: (host: string) => Promise<string[]>;
   /** builds the payment header for the chosen option; injected for tests */
   sign?: (paymentRequired: unknown, chosen: PaymentRequirements) => Promise<Record<string, string>>;
   readClient?: ReturnType<typeof makeClient>;
@@ -71,6 +75,48 @@ async function readBody(res: Response): Promise<unknown> {
   }
 }
 
+/** Loopback, private, link-local (cloud metadata), CGNAT and unspecified ranges — what an
+ *  agent talked into "calling a service" must never reach on the machine it runs on. */
+export function isPrivateAddress(ip: string): boolean {
+  const v4 = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
+  if (isIP(v4) === 4) {
+    const [a, b] = v4.split(".").map(Number);
+    return (
+      a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224
+    );
+  }
+  const l = ip.toLowerCase();
+  return l === "::" || l === "::1" || l.startsWith("fc") || l.startsWith("fd") || l.startsWith("fe80");
+}
+
+/** Why the agent may not call this URL, or null. https only, to a public host; plain http and
+ *  local hosts only on testnet, where the local test sellers live. */
+export async function urlProblem(
+  raw: string,
+  network: "testnet" | "pubnet",
+  resolve: (host: string) => Promise<string[]>,
+): Promise<string | null> {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return "not a URL";
+  }
+  if (url.protocol !== "https:" && !(network === "testnet" && url.protocol === "http:")) {
+    return `${url.protocol} is not allowed — https only`;
+  }
+  if (network === "testnet") return null;
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal")) return "local hosts are not allowed";
+  const addrs = isIP(host) ? [host] : await resolve(host).catch(() => []);
+  if (addrs.length === 0) return `${host} does not resolve`;
+  if (addrs.some(isPrivateAddress)) return `${host} resolves to a private address`;
+  return null;
+}
+
+const defaultResolve = async (host: string) => (await lookup(host, { all: true })).map((a) => a.address);
+
 const keyOf = (r: PaymentRequirements) => `${r.network}|${r.asset}|${r.payTo}|${r.amount}`;
 
 export async function callService(ctx: ServerContext, args: CallArgs, deps: CallDeps = {}): Promise<CallOutcome> {
@@ -78,8 +124,13 @@ export async function callService(ctx: ServerContext, args: CallArgs, deps: Call
   if (!ctx.credential) throw new Error("No agent credential — run `eunomia-mcp init` first.");
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const method = (args.method ?? "POST").toUpperCase();
+  const bad = await urlProblem(args.url, ctx.net.name, deps.resolve ?? defaultResolve);
+  if (bad) throw new Error(`refusing to call ${args.url}: ${bad}`);
   const init: RequestInit = {
     method,
+    // A redirect is never followed: it would take the request — and on the second leg the
+    // payment header — to a host nobody checked.
+    redirect: "manual",
     headers: { accept: "application/json", ...(args.body !== undefined ? { "content-type": "application/json" } : {}) },
     ...(args.body !== undefined && method !== "GET" ? { body: JSON.stringify(args.body) } : {}),
   };

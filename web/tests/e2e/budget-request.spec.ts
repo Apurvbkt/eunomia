@@ -59,6 +59,7 @@ test("the owner approves an agent's budget request with one signature", async ({
       hours: 6,
       payees: [vendor.publicKey()],
       task: "Compare three suppliers' prices",
+      expires: Math.floor(Date.now() / 1000) + 3600,
     },
     agent,
   );
@@ -77,8 +78,15 @@ test("the owner approves an agent's budget request with one signature", async ({
   await expect(card).toContainText(/6 hours/);
   await expect(card).toContainText(/approved payee/i);
   await expect(card).toContainText(/has not worked with/i);
+  // A key this treasury has never seen is approved only once the owner pastes the one their
+  // agent printed: a stranger's valid link stays inert.
+  const approveBtn = card.getByRole("button", { name: /approve budget/i });
+  await expect(approveBtn).toBeDisabled();
+  await card.getByLabel(/your agent's public key/i).fill(Keypair.random().publicKey());
+  await expect(approveBtn).toBeDisabled();
+  await card.getByLabel(/your agent's public key/i).fill(agent.publicKey());
   await page.screenshot({ path: "test-results/budget-request-1-card.png", fullPage: true });
-  await card.getByRole("button", { name: /approve budget/i }).click();
+  await approveBtn.click();
   await expect(page.locator('[data-toast-kind="success"]', { hasText: /budget approved/i })).toBeVisible({ timeout: 180_000 });
 
   // The request is consumed: the link is gone from the address bar and the card with it.
