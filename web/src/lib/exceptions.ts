@@ -65,6 +65,13 @@ export function exceptionStatus(
   const s = lifecycle?.session;
   if (s && nowSec < Number(s.valid_until) && s.spent + req.amount > s.limit) return "pending";
   if (state.daySpent + req.amount > state.dailyLimit) return "pending";
+  // v4: a monthly budget and a task budget's payee list bind too. (A payee's own monthly cap
+  // is not in the snapshot; the agent's pre-flight reads it before paying.)
+  const v4 = lifecycle?.v4;
+  if (v4 && v4.monthlyLimit > 0n && v4.monthSpent + req.amount > v4.monthlyLimit) return "pending";
+  if (v4 && s && nowSec < Number(s.valid_until) && v4.sessionPayees.length > 0 && !v4.sessionPayees.includes(req.payee)) {
+    return "pending";
+  }
   if (req.amount > state.balance) return "pending";
   return "resolved";
 }
@@ -90,6 +97,11 @@ export function ownerActionFor(code: number): OwnerAction {
       return { kind: "pause", label: "Resume treasury" };
     case 6:
       return { kind: "fund", label: "Fund the treasury in Overview" };
+    case 14:
+    case 15:
+      return { kind: "limits", label: "Raise the monthly limit or payee cap in Settings" };
+    case 17:
+      return { kind: "leash", label: "Approve a budget that names this payee" };
     default:
       return { kind: "none", label: "No dashboard action" };
   }

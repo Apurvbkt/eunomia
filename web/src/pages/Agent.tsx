@@ -67,6 +67,7 @@ export default function Agent() {
   }
 
   const left = session ? (session.limit > session.spent ? session.limit - session.spent : 0n) : 0n;
+  const taskPayees = t.lifecycle?.v4?.sessionPayees ?? [];
   const pct = session && session.limit > 0n ? Math.min(100, Number((session.spent * 10000n) / session.limit) / 100) : 0;
 
   return (
@@ -88,6 +89,11 @@ export default function Agent() {
                 {t.sessionSecret ? "key on this device" : "external agent (eunomia-mcp)"} · pays without asking; every payment
                 is still checked against your rules on Stellar.
               </div>
+              {taskPayees.length > 0 && (
+                <div className="verdict__why">
+                  Task budget · may pay only {taskPayees.map((p) => shortAddr(p)).join(", ")}
+                </div>
+              )}
             </div>
             <div className="verdict__side">
               <a className="verdict__tx" href={`${EXPLORER}/account/${session.agent}`} target="_blank" rel="noreferrer">
@@ -158,6 +164,9 @@ export default function Agent() {
             <>
               <div className="panel__kv"><span>Per day, at most</span><span className="num">{fmtXlm(t.state.dailyLimit)} {t.tokenCode}</span></div>
               <div className="panel__kv"><span>Per payment, at most</span><span className="num">{fmtXlm(t.state.perTaskLimit)} {t.tokenCode}</span></div>
+              {t.lifecycle?.v4 && t.lifecycle.v4.monthlyLimit > 0n && (
+                <div className="panel__kv"><span>Per month, at most</span><span className="num">{fmtXlm(t.lifecycle.v4.monthlyLimit)} {t.tokenCode}</span></div>
+              )}
               <div className="panel__kv"><span>Payees</span><span>approved list only</span></div>
               <div className="panel__kv"><span>Revoke</span><span>instant, from here</span></div>
               <div className="panel__note">A Leash lets the agent sign without a popup. It lifts nothing — every payment is checked on Stellar.</div>

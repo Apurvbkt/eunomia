@@ -304,6 +304,43 @@ export async function pay(
 export interface Lifecycle {
   paused: boolean;
   session: Session | null;
+  /** v4 limits; null on an older treasury, which has none of them */
+  v4?: V4Limits | null;
+}
+
+export interface V4Limits {
+  /** `year * 12 + month - 1`, UTC — the key monthly figures are stored under */
+  month: number;
+  /** 0 = no monthly limit */
+  monthlyLimit: bigint;
+  monthSpent: bigint;
+  /** 0 = uncapped; fixed at deploy */
+  depositCap: bigint;
+  /** the payees the running Leash is restricted to; empty = any approved payee */
+  sessionPayees: string[];
+}
+
+/** The v4 surfaces, or null when the treasury predates them (`this_month` is missing). */
+async function readV4Limits(t: Treasury): Promise<V4Limits | null> {
+  let month: number;
+  try {
+    month = (await t.client.this_month()).result;
+  } catch {
+    return null;
+  }
+  const [monthlyLimit, monthSpent, depositCap, sessionPayees] = await Promise.all([
+    t.client.monthly_limit(),
+    t.client.month_spent({ month }),
+    t.client.deposit_cap(),
+    t.client.session_payees(),
+  ]);
+  return {
+    month,
+    monthlyLimit: monthlyLimit.result,
+    monthSpent: monthSpent.result,
+    depositCap: depositCap.result,
+    sessionPayees: sessionPayees.result,
+  };
 }
 
 /** The v3 lifecycle state (pause flag + agent session). Returns null on a pre-M2
@@ -311,7 +348,7 @@ export interface Lifecycle {
 export async function readLifecycle(t: Treasury): Promise<Lifecycle | null> {
   try {
     const [paused, session] = await Promise.all([t.client.is_paused(), t.client.get_session()]);
-    return { paused: paused.result, session: session.result ?? null };
+    return { paused: paused.result, session: session.result ?? null, v4: await readV4Limits(t) };
   } catch {
     return null;
   }
@@ -381,6 +418,16 @@ export async function setTaskBudget(
     "Budget approval failed.",
     t.submit,
   );
+}
+
+/** The most the agent may move per UTC calendar month (owner-signed, v4). 0 removes it. */
+export async function setMonthlyLimit(t: Treasury, limitXlm: number): Promise<PayResult> {
+  return sendTx(() => t.client.set_monthly_limit({ limit: toStroops(limitXlm) }), "Monthly limit update failed.", t.submit);
+}
+
+/** The most one payee may receive per month (owner-signed, v4). 0 removes the cap. */
+export async function setPayeeCap(t: Treasury, payee: string, capXlm: number): Promise<PayResult> {
+  return sendTx(() => t.client.set_payee_cap({ payee, cap: toStroops(capXlm) }), "Payee cap update failed.", t.submit);
 }
 
 /** Instantly revoke the session (owner-signed) — spending falls back to the wallet. */

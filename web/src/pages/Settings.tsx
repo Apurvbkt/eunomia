@@ -38,6 +38,28 @@ export default function Settings() {
     } else if (res.validation) setLimitsErr(res.msg);
   };
 
+  const v4 = t.lifecycle?.v4 ?? null;
+  const [newMonthly, setNewMonthly] = useState("");
+  const [capWho, setCapWho] = useState("");
+  const [capAmt, setCapAmt] = useState("");
+  const [monthErr, setMonthErr] = useState("");
+
+  const doMonthly = async () => {
+    setMonthErr("");
+    const res = await t.updateMonthly(newMonthly);
+    if (res.ok) setNewMonthly("");
+    else if (res.validation) setMonthErr(res.msg);
+  };
+
+  const doCap = async () => {
+    setMonthErr("");
+    const res = await t.capPayee(capWho, capAmt);
+    if (res.ok) {
+      setCapWho("");
+      setCapAmt("");
+    } else if (res.validation) setMonthErr(res.msg);
+  };
+
   const doWithdraw = async () => {
     setWithdrawErr("");
     const res = await t.withdraw(withdrawTo, withdrawAmt);
@@ -119,6 +141,63 @@ export default function Settings() {
           </div>
           {limitsErr && <div className="err">{limitsErr}</div>}
         </section>
+
+        {/* ---- v4: the month, and individual payees ---- */}
+        {v4 && (
+          <section className="panel panel--pad">
+            <div className="eyebrow">Per month</div>
+            <div className="panel__kv">
+              <span>This month, at most</span>
+              <span className="num">{v4.monthlyLimit > 0n ? `${fmtXlm(v4.monthlyLimit)} ${t.tokenCode}` : "no monthly limit"}</span>
+            </div>
+            <div className="panel__kv"><span>Moved this month</span><span className="num">{fmtXlm(v4.monthSpent)} {t.tokenCode}</span></div>
+            {v4.depositCap > 0n && (
+              <div className="panel__kv"><span>Deposit cap (beta, fixed)</span><span className="num">{fmtXlm(v4.depositCap)} {t.tokenCode}</span></div>
+            )}
+            <div className="rowline">
+              <input
+                className="field field--mono"
+                style={{ flex: 1 }}
+                inputMode="decimal"
+                aria-label={`Monthly limit in ${t.tokenCode}`}
+                placeholder={`Monthly limit (${t.tokenCode}) — 0 removes it`}
+                value={newMonthly}
+                onChange={(e) => setNewMonthly(e.target.value)}
+              />
+              <button className="btn" onClick={() => void doMonthly()} disabled={!!t.busy} type="button">
+                {t.busy === "monthly" && newMonthly ? "Saving…" : "Set monthly limit"}
+              </button>
+            </div>
+            <div className="eyebrow" style={{ marginTop: 8 }}>Cap one payee per month</div>
+            <input
+              className="field field--mono"
+              aria-label="Payee to cap"
+              placeholder="Payee address (G… or C…)"
+              spellCheck={false}
+              value={capWho}
+              onChange={(e) => setCapWho(e.target.value)}
+            />
+            <div className="rowline">
+              <input
+                className="field field--mono"
+                style={{ flex: 1 }}
+                inputMode="decimal"
+                aria-label={`Payee monthly cap in ${t.tokenCode}`}
+                placeholder={`Monthly cap (${t.tokenCode}) — 0 removes it`}
+                value={capAmt}
+                onChange={(e) => setCapAmt(e.target.value)}
+              />
+              <button className="btn" onClick={() => void doCap()} disabled={!!t.busy} type="button">
+                {t.busy === "monthly" && capAmt ? "Saving…" : "Set cap"}
+              </button>
+            </div>
+            <div className="panel__note">
+              Months are UTC calendar months. A cap narrows what an approved payee can receive; it does not approve
+              anyone. Cap your agent's own address to bound what it can hold outside the treasury.
+            </div>
+            {monthErr && <div className="err">{monthErr}</div>}
+          </section>
+        )}
       </div>
 
       {/* The exit paths sit apart from the settings you change day to day — pausing and

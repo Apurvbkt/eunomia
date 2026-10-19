@@ -110,7 +110,26 @@ describe("readLifecycle", () => {
       is_paused: async () => ({ result: true }),
       get_session: async () => ({ result: undefined }),
     } as unknown as Client;
-    expect(await readLifecycle({ client: fake, submit: async () => ({}) })).toEqual({ paused: true, session: null });
+    expect(await readLifecycle({ client: fake, submit: async () => ({}) })).toEqual({ paused: true, session: null, v4: null });
+  });
+
+  it("reads the v4 limits when the treasury has them", async () => {
+    const fake = {
+      is_paused: async () => ({ result: false }),
+      get_session: async () => ({ result: undefined }),
+      this_month: async () => ({ result: 24_321 }),
+      monthly_limit: async () => ({ result: 300n }),
+      month_spent: async ({ month }: { month: number }) => ({ result: month === 24_321 ? 120n : 0n }),
+      deposit_cap: async () => ({ result: 10_000n }),
+      session_payees: async () => ({ result: ["GPAYEE"] }),
+    } as unknown as Client;
+    expect((await readLifecycle({ client: fake, submit: async () => ({}) }))?.v4).toEqual({
+      month: 24_321,
+      monthlyLimit: 300n,
+      monthSpent: 120n,
+      depositCap: 10_000n,
+      sessionPayees: ["GPAYEE"],
+    });
   });
 
   it("returns null on a pre-M2 treasury (probe failure = legacy signal)", async () => {

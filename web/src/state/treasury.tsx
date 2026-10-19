@@ -29,6 +29,8 @@ import {
   setLimits,
   setPaused,
   setTaskBudget,
+  setMonthlyLimit,
+  setPayeeCap,
   type Lifecycle,
   type EunomiaState,
 } from "../lib/userTreasury";
@@ -913,6 +915,69 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
     [address, treasuryId, loadState, toast],
   );
 
+  // v4: the monthly budget and per-payee monthly caps. Same shape as updateLimits.
+  const updateMonthly = useCallback(
+    async (limit: string): Promise<ActionOutcome> => {
+      if (!address || !treasuryId) return fail("No treasury open.");
+      const v = limit.trim() === "" || limit.trim() === "0" ? { ok: true as const, value: 0 } : parseXlmAmount(limit, "monthly limit");
+      if (!v.ok) return invalid(v.msg);
+      setBusy("monthly");
+      toast("info", "Updating the monthly limit — confirm in your wallet…");
+      try {
+        const res = await setMonthlyLimit(makeTreasury(treasuryId, await executorFor(address)), v.value);
+        if (res.ok) {
+          void logActivity({ walletAddress: address, treasuryId, action: "limits" });
+          const msg = v.value === 0 ? "Monthly limit removed ✓" : "Monthly limit set ✓ — counted from the start of this UTC month.";
+          toast("success", msg, { hash: res.hash });
+          await loadState(treasuryId, address);
+          return { ok: true, msg, hash: res.hash };
+        }
+        const msg = `Blocked: ${res.errorMessage}`;
+        toast("error", msg);
+        return fail(msg);
+      } catch (e) {
+        const msg = sendErr(e);
+        toast("error", msg);
+        return fail(msg);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [address, treasuryId, loadState, toast],
+  );
+
+  const capPayee = useCallback(
+    async (payee: string, cap: string): Promise<ActionOutcome> => {
+      if (!address || !treasuryId) return fail("No treasury open.");
+      const p = payee.trim();
+      if (!isValidPaymentDest(p)) return invalid("That is not a Stellar address (G… or C…).");
+      const v = cap.trim() === "" || cap.trim() === "0" ? { ok: true as const, value: 0 } : parseXlmAmount(cap, "payee cap");
+      if (!v.ok) return invalid(v.msg);
+      setBusy("monthly");
+      toast("info", "Setting the payee's monthly cap — confirm in your wallet…");
+      try {
+        const res = await setPayeeCap(makeTreasury(treasuryId, await executorFor(address)), p, v.value);
+        if (res.ok) {
+          void logActivity({ walletAddress: address, treasuryId, action: "limits" });
+          const msg = v.value === 0 ? "Payee cap removed ✓" : `Cap set ✓ — ${shortAddr(p)} can receive at most that per month.`;
+          toast("success", msg, { hash: res.hash });
+          await loadState(treasuryId, address);
+          return { ok: true, msg, hash: res.hash };
+        }
+        const msg = `Blocked: ${res.errorMessage}`;
+        toast("error", msg);
+        return fail(msg);
+      } catch (e) {
+        const msg = sendErr(e);
+        toast("error", msg);
+        return fail(msg);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [address, treasuryId, loadState, toast],
+  );
+
   // Catch-up registration for a treasury whose deploy-time registration was skipped.
   const registerActive = useCallback(async (): Promise<ActionOutcome> => {
     if (!address || !treasuryId) return fail("No treasury open.");
@@ -1005,6 +1070,8 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
     togglePause,
     withdraw,
     updateLimits,
+    updateMonthly,
+    capPayee,
     registerActive,
     switchTreasury,
     forgetTreasury,

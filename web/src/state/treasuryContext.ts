@@ -25,6 +25,7 @@ export type Busy =
   | "pause"
   | "withdraw"
   | "limits"
+  | "monthly"
   | "register";
 
 /** validation:true = the wallet popup never opened; show `msg` inline at the form. */
@@ -81,6 +82,10 @@ export interface TreasuryContextValue {
   revokeLeash: () => Promise<ActionOutcome>;
   /** Start a task budget an agent asked for (a verified budget request link). */
   approveBudget: (r: BudgetRequest) => Promise<ActionOutcome>;
+  /** v4: the monthly budget ("" or "0" removes it). */
+  updateMonthly: (limit: string) => Promise<ActionOutcome>;
+  /** v4: a payee's monthly cap ("" or "0" removes it). */
+  capPayee: (payee: string, cap: string) => Promise<ActionOutcome>;
   runAutonomousTask: (to?: string) => Promise<ActionOutcome>;
   /** The agent's own loop — pay, get refused, ask the owner — reported step by step as
    *  each one lands on-chain. `onStep` receives the whole list every time one changes. */
