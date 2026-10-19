@@ -9,7 +9,7 @@ import { contractCodeFromMessage, errText, reasonFromCode, reasonFromErrorName, 
 import type { ServerContext } from "./server.js";
 import { lacksTrustline } from "./receiver.js";
 import { diagnosticsOf, makeSigningClient } from "./signer.js";
-import { isPayee, makeClient, readTreasury } from "./treasury.js";
+import { isPayee, makeClient, payeeCapRemaining, readTreasury } from "./treasury.js";
 
 export interface PayArgs {
   to: string;
@@ -73,6 +73,14 @@ export async function preflightReasons(
   // With a reputation gate the contract may still admit an unlisted payee; only the
   // whitelist-only case is a certain refusal.
   if (!allowedPayee && !snap.reputationPolicy) reasons.push(reasonFromCode(2));
+  // v4: a task budget names its payees, and a payee may carry its own monthly cap.
+  if (budget.taskPayees.length > 0 && !budget.taskPayees.includes(args.to)) reasons.push(reasonFromCode(17));
+  if (snap.v4) {
+    const left = await payeeCapRemaining(client, args.to, snap.v4.month);
+    if (left !== null && args.amount > left) {
+      reasons.push(reasonFromCode(14, `amount exceeds what is left of this payee's monthly cap (${left} stroops)`));
+    }
+  }
   const lacks = deps.lacksTrustline ?? ((token: string, payee: string) => lacksTrustline(ctx.net, token, payee));
   if (await lacks(snap.config.token, args.to)) {
     const self = args.to === ctx.credential?.agentPublicKey;

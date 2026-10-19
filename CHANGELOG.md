@@ -7,6 +7,23 @@ deployed addresses and on-chain proofs in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ## [Unreleased]
 
+- **Fixed (the 08-07 silent deploy)** — a relayed transaction could be announced as done
+  before the ledger agreed. The relay waits a few seconds and then answers 200 with whatever
+  it saw, PENDING and NOT_FOUND included; the app kept only the hash and the treasury setup
+  returned the id its simulation predicted. Every passkey submission now waits for the
+  ledger's own SUCCESS (`ledgerConfirm`), reports FAILED as failed, and a still-unconfirmed
+  one as pending with its hash — never as "Treasury created ✓".
+- **Added (treasury v4, SOW 2 deliverable 1)** — the limits users asked for: a UTC
+  calendar-month budget (`set_monthly_limit`) and a monthly cap per payee (`set_payee_cap`),
+  both charged at escrow commitment like the daily window; task budgets
+  (`set_task_budget`: a Leash that may only pay the payees it names); and a deposit cap fixed
+  at deploy and enforced by `deposit`, the path the app and the factory fund through. New
+  codes 14-17 (13 stays the token contract's). The factory pins the deposit cap, takes the
+  monthly budget and payee caps in `Setup` and funds through `deposit` — still one owner
+  signature. Live on testnet: [`DEPLOYMENT.md`](DEPLOYMENT.md#treasury-v4--monthly-budget-payee-caps-task-budgets-deposit-cap-2026-10-19).
+  `eunomia-mcp` pre-flights the new limits and reports `monthly` and `taskPayees` in the
+  budget; the chain indexer keeps the four new events.
+
 - **Fixed (found in a user session)** — a payee with no trustline for the treasury's token
   was approved without a word, then every payment to it failed with a bare `#13` that the
   agent could not explain. `#13` is the token contract's `TrustlineMissingError`, not the

@@ -17,9 +17,10 @@ test("reasonFromCode / reasonFromErrorName use the binding's names", () => {
   assert.equal(reasonFromErrorName("Nope"), null);
 });
 
-test("#13 is the token contract's TrustlineMissing, and the treasury's own codes stay below it", () => {
+test("#13 is the token contract's TrustlineMissing, and the treasury never uses it", () => {
   // If the treasury ever gains a code 13, this mapping would mislabel a policy verdict.
-  assert.ok(Math.max(...Object.keys(Errors).map(Number)) < 13);
+  // v4 continues at 14 for exactly that reason.
+  assert.ok(!Object.keys(Errors).map(Number).includes(13));
   const r = reasonFromCode(13);
   assert.equal(r.name, "TrustlineMissing");
   assert.match(r.detail, /trustline/);

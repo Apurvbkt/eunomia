@@ -59,6 +59,40 @@ describe("toEventRow", () => {
     });
   });
 
+  it("v4 deposit: (deposit, from) -> amount", () => {
+    expect(toEventRow(event([sym("deposit"), b64(addr(OWNER))], i128(250_000_000n)), "testnet")).toMatchObject({
+      kind: "deposit",
+      counterparty: OWNER,
+      amount: "250000000",
+    });
+  });
+
+  it("v4 payee_cap and monthly carry their limit as the amount", () => {
+    expect(toEventRow(event([sym("payee_cap"), b64(addr(OWNER))], i128(9n)), "testnet")).toMatchObject({
+      kind: "payee_cap",
+      counterparty: OWNER,
+      amount: "9",
+    });
+    expect(toEventRow(event([sym("monthly")], i128(7n)), "testnet")).toMatchObject({
+      kind: "monthly",
+      counterparty: null,
+      amount: "7",
+    });
+  });
+
+  it("v4 budget: (budget, agent) -> (valid_until, limit, payees) keeps the agent and the cap", () => {
+    const value = xdr.ScVal.scvVec([
+      nativeToScVal(1_800_000_000n, { type: "u64" }),
+      i128(30_000_000n),
+      xdr.ScVal.scvVec([addr(TREASURY)]),
+    ]);
+    expect(toEventRow(event([sym("budget"), b64(addr(OWNER))], value), "testnet")).toMatchObject({
+      kind: "budget",
+      counterparty: OWNER,
+      amount: "30000000",
+    });
+  });
+
   it("paused: no counterparty, no amount", () => {
     expect(toEventRow(event([sym("paused")], xdr.ScVal.scvBool(true)), "testnet")).toMatchObject({
       kind: "paused",

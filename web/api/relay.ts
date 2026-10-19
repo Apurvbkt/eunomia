@@ -16,7 +16,7 @@ import process from "node:process";
 import { classifyHostFunction, hostFunctionFromEnvelope } from "../src/lib/hostFunction.js";
 import { allowedWasmHashes, authEntriesAreSafe, isRelayAllowed } from "../src/lib/relayGuard.js";
 import { submitEnvelope, submitHostFunction } from "../src/lib/relaySubmit.js";
-import { TREASURY_FACTORY_ID } from "../src/lib/treasuryWasm.js";
+import { LEGACY_TREASURY_FACTORY_IDS, TREASURY_FACTORY_ID } from "../src/lib/treasuryWasm.js";
 
 // Invisible characters smuggled into an env value have bitten this project twice (a BOM in
 // the Supabase key, a BOM+CRLF in the WalletConnect id) — both times the symptom was a silent
@@ -35,7 +35,12 @@ const csv = (v: string | undefined): string[] =>
 const NATIVE_SAC = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 // The factory is admitted by address for the same reason: a passkey user's one-signature
 // setup is a call on it, and the treasury it deploys inside that call runs our wasm.
-const ALLOWED_CONTRACTS = [...csv(process.env.RELAY_ALLOWED_CONTRACTS), NATIVE_SAC, TREASURY_FACTORY_ID];
+const ALLOWED_CONTRACTS = [
+  ...csv(process.env.RELAY_ALLOWED_CONTRACTS),
+  NATIVE_SAC,
+  TREASURY_FACTORY_ID,
+  ...LEGACY_TREASURY_FACTORY_IDS,
+];
 // Includes the treasury wasm this build deploys whether or not the env names it — the two
 // drifted once already and silently broke every passkey sign-up. See allowedWasmHashes.
 const ALLOWED_WASM = allowedWasmHashes(clean(process.env.RELAY_ALLOWED_WASM));

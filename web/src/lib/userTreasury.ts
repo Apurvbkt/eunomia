@@ -14,7 +14,7 @@ import {
 import { Client, type Session } from "./treasuryClient";
 import { contractErr, errText } from "./wallet-errors";
 import type { SubmittableTx, TxExecutor } from "./executor";
-import { TREASURY_WASM_HASH } from "./treasuryWasm";
+import { DEPOSIT_CAP_STROOPS, TREASURY_WASM_HASH } from "./treasuryWasm";
 import { NETWORK_PASSPHRASE, RPC_URL } from "../config";
 
 // Native XLM SAC on testnet — the token each user treasury holds and spends.
@@ -104,8 +104,9 @@ export function makeTreasury(contractId: string, executor: TxExecutor): Treasury
   };
 }
 
-/** The `__constructor(admin, agent, token, daily_limit, per_task_limit)` arguments, in the
- *  order the contract declares them. Only the smart-wallet deploy path needs them positionally
+/** The `__constructor(admin, agent, token, daily_limit, per_task_limit, deposit_cap)`
+ *  arguments, in the order the contract declares them. The deposit cap is the factory's, so
+ *  a treasury deployed directly is bounded exactly like one the factory made. Only the smart-wallet deploy path needs them positionally
  *  — the contract client builds them from its own spec. */
 function constructorArgs(owner: string, dailyXlm: number, perTaskXlm: number): xdr.ScVal[] {
   return [
@@ -114,6 +115,7 @@ function constructorArgs(owner: string, dailyXlm: number, perTaskXlm: number): x
     new Address(XLM_SAC).toScVal(),
     nativeToScVal(toStroops(dailyXlm), { type: "i128" }),
     nativeToScVal(toStroops(perTaskXlm), { type: "i128" }),
+    nativeToScVal(DEPOSIT_CAP_STROOPS, { type: "i128" }),
   ];
 }
 
@@ -139,6 +141,7 @@ export async function deployTreasury(
       token: XLM_SAC,
       daily_limit: toStroops(dailyXlm),
       per_task_limit: toStroops(perTaskXlm),
+      deposit_cap: DEPOSIT_CAP_STROOPS,
     },
     {
       wasmHash: TREASURY_WASM_HASH,
@@ -154,6 +157,17 @@ export async function deployTreasury(
   return contractId;
 }
 
+/** Whether this treasury runs v4 or later — read from the chain, not assumed from when it was
+ *  made. A treasury without `deposit_cap` fails the simulation outright. */
+async function speaksDeposit(t: Treasury): Promise<boolean> {
+  try {
+    const tx = await t.client.deposit_cap();
+    return typeof tx.result === "bigint";
+  } catch {
+    return false;
+  }
+}
+
 /** Fund a treasury by transferring native XLM from the session's address into the treasury
  *  contract — a SAC transfer either way, but authorised differently.
  *
@@ -165,6 +179,22 @@ export async function fundTreasury(
   executor: TxExecutor,
   amountXlm: number,
 ): Promise<string | undefined> {
+  // v4 treasuries take funding through their capped `deposit`; a bare transfer would walk
+  // straight past the beta's deposit cap. Older treasuries have no `deposit` and keep the
+  // transfer below.
+  const t = makeTreasury(contractId, executor);
+  if (await speaksDeposit(t)) {
+    try {
+      const { hash } = await t.submit(
+        await t.client.deposit({ from: executor.address, amount: toStroops(amountXlm) }),
+      );
+      return hash;
+    } catch (e) {
+      const ce = contractErr(errText(e));
+      throw ce ? new Error(ce.errorMessage) : e;
+    }
+  }
+
   if (executor.transferXlm) {
     await executor.transferXlm(contractId, toStroops(amountXlm));
     return undefined;

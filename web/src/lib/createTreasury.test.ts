@@ -8,7 +8,12 @@ describe("predictTreasuryId", () => {
     // answered with this treasury. If the prediction ever drifts, an agent connected during
     // setup gets a key for a treasury that does not exist.
     const salt = Buffer.from("6bf1c83c814accb8517f129469bdc6ebaf4878d978cf8d484b6f3a832398014f", "hex");
-    expect(predictTreasuryId(salt)).toBe("CBALSDCSLU5VAWG4ZD5EXDUAYXDFTC3ADNXRBJOAQFVC77PW3H6J5XZZ");
+    expect(predictTreasuryId(salt, "CAWLFTQ4V3ZPUWRVL5RGXBBA7FMJ26EXW37GGKCGKOXO4TKABEHF2OMS")).toBe(
+      "CBALSDCSLU5VAWG4ZD5EXDUAYXDFTC3ADNXRBJOAQFVC77PW3H6J5XZZ",
+    );
+    // …and the current factory (v4, 2026-10-19, tx 538d80f2…95ad).
+    const v4 = Buffer.from("a4e1b0c7d2f3e4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f809", "hex");
+    expect(predictTreasuryId(v4)).toBe("CAJHWB3E64NEFLADW6AUR46UA4RYQSRS33KL2YQHJGBZ2C6BZIJ24B25");
   });
 
   it("depends on the salt, the factory and the network — and on nothing else", () => {
@@ -51,6 +56,27 @@ describe("factorySetupArgs", () => {
     expect(s.payees).toEqual([]);
     expect(s.fund).toBe(0n);
     expect(s.register).toBe(false);
+    expect(s.monthly_limit).toBe(0n);
+    expect(s.payee_caps).toEqual([]);
+  });
+
+  it("carries the v4 monthly budget and payee caps in stroops", () => {
+    const s = factorySetupArgs(
+      OWNER,
+      {
+        dailyXlm: 50,
+        perTaskXlm: 10,
+        monthlyXlm: 400,
+        payees: [PAYEE, AGENT],
+        payeeCaps: [{ payee: AGENT, capXlm: 25 }],
+        fundXlm: 0,
+        register: false,
+      },
+      1,
+      salt,
+    );
+    expect(s.monthly_limit).toBe(4_000_000_000n);
+    expect(s.payee_caps).toEqual([{ payee: AGENT, cap: 250_000_000n }]);
   });
 
   it("rounds fractional hours to whole seconds", () => {

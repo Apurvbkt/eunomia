@@ -15,6 +15,18 @@ export interface TreasurySnapshot {
   reputationPolicy: { registry: string; minReputation: bigint } | null;
   /** pre-M2 treasury: no session / pause surface at all */
   legacy: boolean;
+  /** v4 surfaces; absent on older treasuries, which have none of these limits */
+  v4?: {
+    /** 0 = no monthly limit */
+    monthlyLimit: bigint;
+    /** agent-moved value in the current UTC calendar month */
+    monthSpent: bigint;
+    month: number;
+    /** 0 = uncapped */
+    depositCap: bigint;
+    /** payees the current Leash is restricted to; empty = any approved payee */
+    sessionPayees: string[];
+  };
 }
 
 export interface SessionView {
@@ -47,6 +59,10 @@ export interface Budget {
   daySpent: bigint;
   dailyRemaining: bigint;
   freeBalance: bigint;
+  /** v4 calendar-month budget; null when the treasury has none */
+  monthly: { limit: bigint; spent: bigint; remaining: bigint } | null;
+  /** v4 task budget: the only payees the Leash may pay; empty = any approved payee */
+  taskPayees: string[];
   session: SessionView | null;
   canSpend: boolean;
   spendableNow: bigint;
@@ -71,6 +87,10 @@ export function computeBudget(
 ): Budget {
   const dailyRemaining = max0(s.config.daily_limit - s.daySpent);
   const freeBalance = max0(s.balance - s.locked);
+  const monthly =
+    s.v4 && s.v4.monthlyLimit > 0n
+      ? { limit: s.v4.monthlyLimit, spent: s.v4.monthSpent, remaining: max0(s.v4.monthlyLimit - s.v4.monthSpent) }
+      : null;
   const blockers: string[] = [];
   let session: SessionView | null = null;
 
@@ -120,18 +140,22 @@ export function computeBudget(
   if (dailyRemaining === 0n) {
     blockers.push("The treasury's rolling 24h limit is reached — wait for spend to roll off the window.");
   }
+  if (monthly && monthly.remaining === 0n) {
+    blockers.push("This month's budget is used up — spending resumes when the UTC month turns, or the owner raises it.");
+  }
   if (freeBalance === 0n) {
     blockers.push("The treasury has no free balance — the owner must fund it.");
   }
 
   const canSpend = blockers.length === 0;
+  const monthlyRemaining = monthly ? [monthly.remaining] : [];
   const spendableNow =
     !canSpend
       ? 0n
       : rootSpends
-        ? min(s.config.per_task_limit, dailyRemaining, freeBalance)
+        ? min(s.config.per_task_limit, dailyRemaining, freeBalance, ...monthlyRemaining)
         : session
-          ? min(s.config.per_task_limit, dailyRemaining, session.remaining, freeBalance)
+          ? min(s.config.per_task_limit, dailyRemaining, session.remaining, freeBalance, ...monthlyRemaining)
           : 0n;
 
   const b: Budget = {
@@ -143,6 +167,8 @@ export function computeBudget(
     daySpent: s.daySpent,
     dailyRemaining,
     freeBalance,
+    monthly,
+    taskPayees: session?.active ? (s.v4?.sessionPayees ?? []) : [],
     session,
     canSpend,
     spendableNow,
@@ -164,6 +190,9 @@ export function computeBudget(
       }
       if (session && session.isThisAgent && session.active && amount > session.remaining) {
         reasons.push(reason(10, `amount exceeds what is left of the Leash cap (${session.remaining} stroops)`));
+      }
+      if (monthly && amount > monthly.remaining) {
+        reasons.push(reason(15, `amount exceeds what is left of this month's budget (${monthly.remaining} stroops)`));
       }
       if (amount > freeBalance) {
         reasons.push(reason(6, `amount exceeds the treasury's free balance (${freeBalance} stroops)`));

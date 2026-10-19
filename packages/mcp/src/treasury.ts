@@ -41,7 +41,40 @@ export async function readTreasury(client: Client, contractId: string): Promise<
     session: session ?? null,
     // The dashboard's rule: no session surface → pre-M2 treasury, hide agent features.
     legacy: paused === undefined,
+    v4: await readV4(client),
   };
+}
+
+/** The v4 limits, or undefined on an older treasury (`this_month` does not exist there). */
+async function readV4(client: Client): Promise<TreasurySnapshot["v4"]> {
+  let month: number;
+  try {
+    month = (await client.this_month()).result;
+  } catch {
+    return undefined;
+  }
+  const [monthlyLimit, monthSpent, depositCap, sessionPayees] = await Promise.all([
+    client.monthly_limit(),
+    client.month_spent({ month }),
+    client.deposit_cap(),
+    client.session_payees(),
+  ]);
+  return {
+    month,
+    monthlyLimit: monthlyLimit.result,
+    monthSpent: monthSpent.result,
+    depositCap: depositCap.result,
+    sessionPayees: sessionPayees.result,
+  };
+}
+
+/** What `payee` may still receive this month under its v4 cap; null when it has no cap or the
+ *  treasury predates v4. */
+export async function payeeCapRemaining(client: Client, payee: string, month: number): Promise<bigint | null> {
+  const cap = await optional(client.payee_cap({ payee }));
+  if (!cap) return null;
+  const spent = (await client.payee_spent({ payee, month })).result;
+  return cap > spent ? cap - spent : 0n;
 }
 
 /** The chain's exact answer to "is this address whitelisted?". */

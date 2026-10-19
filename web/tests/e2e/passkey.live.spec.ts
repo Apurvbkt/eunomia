@@ -28,6 +28,7 @@ import { rpc, xdr } from "@stellar/stellar-sdk";
 import { Client as TreasuryClient } from "../../src/lib/treasuryClient";
 import { Client as RegistryClient } from "../../src/lib/registryClient";
 import { NETWORK_PASSPHRASE, REGISTRY_ID, RPC_URL } from "../../src/config";
+import { DEPOSIT_CAP_STROOPS, TREASURY_WASM_HASH } from "../../src/lib/treasuryWasm";
 
 const EXCLUDE = fileURLToPath(new URL("../../../docs/metrics/e2e-exclude.json", import.meta.url));
 /** The Week-1 agent key (eunomia-mcp init) — any G… works; this one lets the MCP smoke run
@@ -192,7 +193,9 @@ test.describe.serial("Live passkey onboarding", () => {
     // the treasury really runs the shipped code
     const instance = await server.getContractData(created!.treasury!, xdr.ScVal.scvLedgerKeyContractInstance());
     const executable = instance.val.contractData().val().instance().executable();
-    expect(executable.wasmHash().toString("hex")).toBe("824472060b3abec7c6c64e8985fa5d0c5a39ea277fbb67eab3125a483d059641");
+    expect(executable.wasmHash().toString("hex")).toBe(TREASURY_WASM_HASH);
+    // v4: the factory's deposit cap rides along on every treasury it makes
+    expect((await treasury.deposit_cap()).result).toBe(DEPOSIT_CAP_STROOPS);
 
     expect(pageErrors).toEqual([]);
 

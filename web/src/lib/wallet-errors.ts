@@ -78,6 +78,11 @@ export const CONTRACT_ERRORS: Record<number, string> = {
   10: "Over the agent session's spending cap — the payment never left the treasury.",
   11: "Invalid limits — both must be positive and per-payment can't exceed daily.",
   12: "Escrow deadline must be in the future.",
+  13: "The payee can't hold this token yet — their account needs a trustline first.",
+  14: "Over this payee's monthly cap — the payment never left the treasury.",
+  15: "Over this month's budget — the payment never left the treasury.",
+  16: "That would take the treasury over its deposit cap — this beta holds a limited amount per treasury.",
+  17: "Outside the task budget — this agent may only pay the payees the owner approved for the task.",
 };
 
 /** Parse a contract guardrail rejection out of a raw error message. Returns null

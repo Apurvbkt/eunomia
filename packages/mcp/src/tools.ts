@@ -36,6 +36,13 @@ export function serializeBudget(b: Budget, net: NetworkName, unit: string | null
     daySpent: amt(b.daySpent),
     dailyRemaining: amt(b.dailyRemaining),
     freeBalance: amt(b.freeBalance),
+    monthly: b.monthly && {
+      limit: amt(b.monthly.limit),
+      spent: amt(b.monthly.spent),
+      remaining: amt(b.monthly.remaining),
+    },
+    // A task budget's payee list; empty means the Leash may pay any approved payee.
+    taskPayees: b.taskPayees,
     session: b.session && {
       agent: b.session.agent,
       isThisAgent: b.session.isThisAgent,
@@ -73,6 +80,9 @@ const OWNER_ACTION: Record<number, string> = {
   6: "Fund the treasury — Dashboard → Overview → fund.",
   9: "Resume the treasury — Dashboard → Settings → pause toggle.",
   10: "Start a bigger Leash — Dashboard → Agent → revoke, then authorise this key with a higher cap.",
+  14: "Raise this payee's monthly cap — Dashboard → Payments (set_payee_cap), or wait for the month to turn.",
+  15: "Raise the monthly budget — Dashboard → Settings → limits (set_monthly_limit), or wait for the month to turn.",
+  17: "Approve a task budget that includes this payee — the agent can request one; the owner approves it once.",
 };
 export const ownerActionsFor = (codes: number[]): string[] =>
   codes.map((c) => OWNER_ACTION[c] ?? `Resolve contract error #${c}.`);

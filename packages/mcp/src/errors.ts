@@ -17,11 +17,15 @@ const DETAILS: Record<number, string> = {
   6: "amount exceeds the treasury's free balance",
   9: "treasury is paused by its owner",
   10: "amount exceeds what is left of the Leash cap",
+  14: "amount exceeds what is left of this payee's monthly cap",
+  15: "amount exceeds what is left of this month's budget",
+  16: "deposit would take the treasury over its deposit cap",
+  17: "the Leash is a task budget and this payee is not one it names — ask the owner for a budget that includes it",
 };
 
 /** Codes the token contract raises from inside pay(), not the treasury's policy. They reach
- *  the agent as the same `Error(Contract, #N)`; the treasury's own codes end at 12
- *  (errors.test.ts pins that), so these numbers cannot be confused with a policy verdict. */
+ *  the agent as the same `Error(Contract, #N)`; the treasury skips 13 (errors.test.ts pins
+ *  that), so these numbers cannot be confused with a policy verdict. */
 const TOKEN_ERRORS: Record<number, { name: string; detail: string }> = {
   13: {
     name: "TrustlineMissing",

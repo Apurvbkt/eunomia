@@ -313,6 +313,44 @@ entry and the running wasm hash back from the chain. Red since 08-07, green from
 The relay admits the factory by address (`web/src/lib/treasuryWasm.ts`), so the treasury it
 deploys inside the call needs no separate sponsorship.
 
+## Treasury v4 — monthly budget, payee caps, task budgets, deposit cap (2026-10-19)
+
+The limits users asked for in the first Instaward's sessions, and the deposit cap the mainnet
+beta runs under while the code is unaudited. `cargo test -p treasury` → 91 (28 new in
+`test_v4.rs`), `cargo test -p treasury_factory` → 12.
+
+- **Monthly budget** — `set_monthly_limit`; agent-moved value per UTC calendar month
+  (`month_of`: integer civil-from-days, no host call), charged at escrow commitment.
+- **Payee cap** — `set_payee_cap`; most one payee may receive per month. Narrows, never
+  approves. Capping the agent's own float address bounds money that left the treasury.
+- **Task budget** — `set_task_budget(agent, valid_until, limit, payees)`: a Leash restricted
+  to ≤16 named payees; `set_session` and `revoke_session` clear the scope.
+- **Deposit cap** — a constructor argument with no setter; `deposit` refuses to take the
+  balance over it. A bare SAC transfer to the address cannot be refused by any contract, so
+  the cap binds every client that funds through `deposit` — the app and the factory do.
+- Codes: 14 `ExceedsPayeeCap` · 15 `ExceedsMonthlyLimit` · 16 `ExceedsDepositCap` ·
+  17 `PayeeOutsideTaskBudget`. 13 is skipped on purpose (the token's `TrustlineMissing`).
+
+| Item | Value |
+|---|---|
+| Treasury v4 wasm | `c11a5c63e610be259cdcf23d276fdf6f3069fdc6069c4d713b52d556f24238ec` — upload [`7b7cdfdf…ecae8`](https://stellar.expert/explorer/testnet/tx/7b7cdfdf6c858ab14f279ebe0d56b3785a68cef0485b5880bf6b2c3c51cfefa7) |
+| **Factory v4** (deposit cap 1,000 XLM, registry `CBEPVXK6…4ZE7`) | [`CAP7SNLZ…MANFK`](https://stellar.expert/explorer/testnet/contract/CAP7SNLZZT6VGC7ULSBTGPIGTC5EBAFSDMA37YFYTIROJUTIYXTMANFK) — deploy [`08d8aeaa…2920`](https://stellar.expert/explorer/testnet/tx/08d8aeaaf5b8f90c4ea4058a4046a87334e1191e317b7c63d9f55bae836e2920) |
+| Smoke treasury (`alice`; daily 100 / per-payment 10 / month 30 XLM; `service` capped at 15 XLM a month; 50 XLM through `deposit`) | [`CCRYLUMM…L6DB`](https://stellar.expert/explorer/testnet/contract/CCRYLUMMDGXVO6AO4ABACVONRAXFRDMV75HS3VTYPBFY74QSLU2BL6DB) — one tx, events `payee_add`, `payee_cap`, `monthly`, `deposit`, `created` |
+
+Verified live on the smoke treasury:
+
+| Check | Result |
+|---|---|
+| pay 10 XLM to `service` | [`58c2a530…c44d`](https://stellar.expert/explorer/testnet/tx/58c2a5304d811506d85ba648210b8802a47067303e2ad648c1dc515e37dec44d) |
+| a further 6 XLM to `service` (cap 15) | refused, `Error(Contract, #14)` |
+| `deposit` up to the 1,000 XLM cap, then 1 stroop more | [`9021d62f…e820`](https://stellar.expert/explorer/testnet/tx/9021d62fdbd4cbd36a361f2c5f87f82782aee58a78e3d4937988e2f18ee6c820) · refused, `#16` · withdrawn [`1ae1ca48…ecae8`](https://stellar.expert/explorer/testnet/tx/1ae1ca48bd75f8d3da5a8971a7d71a926291146086237f42f732b4d8606ecae8) |
+| task budget for `agent` naming only `alice` | [`814bbdb5…92ed`](https://stellar.expert/explorer/testnet/tx/814bbdb5f971a7ff9e87b861209eb0661f81bfc4a80a6984d3773847b89492ed); `agent` paying `service` → `#17`; paying `alice` → [`c69fa1ad…dfa`](https://stellar.expert/explorer/testnet/tx/c69fa1ad1a9f87def3eaa7a14cb647f8cb4e29d7820a28fc2ca3a115aa5bedfa) |
+| monthly budget set to exactly the 11 XLM spent, then 1 stroop | [`b003a1f6…6811`](https://stellar.expert/explorer/testnet/tx/b003a1f674b35a3b50da3e85701559657afaf8a801d259a63b8a6e7344496811) · refused, `#15` |
+| factory address prediction (salt `a4e1b0c7…f809`) | [`538d80f2…95ad`](https://stellar.expert/explorer/testnet/tx/538d80f292cbff4f2f107a32889c457bd9c46232298dc55048aa56b0911495ad) → `CAJHWB3E…4B25`, pinned in `createTreasury.test.ts` |
+
+The app creates through the v4 factory; the relay keeps admitting the v3.5 factory and wasm
+(`LEGACY_TREASURY_*` in `web/src/lib/treasuryWasm.ts`), so earlier treasuries keep working.
+
 ## Anchor leg — the USDC a TRY-funded treasury holds
 
 A treasury funded with TRY through the SEP-6 anchor (`tr-mock-anchor.fly.dev`) holds the anchor's

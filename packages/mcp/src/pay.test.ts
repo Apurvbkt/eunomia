@@ -247,3 +247,73 @@ test("a payment the network took but did not confirm is pending, never a failure
   const json = serializeOutcome(out, "testnet");
   assert.doesNotMatch(String(json.nextStep), /^retry/);
 });
+
+// ---- v4: payee caps and task budgets -------------------------------------------------
+
+/** A v4 treasury: the same snapshot plus the month, its budget and the task scope. */
+const v4Client = (over: Record<string, unknown> = {}) =>
+  readClient({
+    this_month: () => Promise.resolve({ result: 24_321 }),
+    monthly_limit: () => Promise.resolve({ result: 0n }),
+    month_spent: () => Promise.resolve({ result: 0n }),
+    deposit_cap: () => Promise.resolve({ result: 0n }),
+    session_payees: () => Promise.resolve({ result: [] }),
+    payee_cap: () => Promise.resolve({ result: 0n }),
+    payee_spent: () => Promise.resolve({ result: 0n }),
+    ...over,
+  });
+
+test("v4: a payee's monthly cap is caught before anything is signed", async () => {
+  const pre = await preflightReasons(
+    ctx(),
+    { to: "GPAYEE", amount: 30_000_000n, taskId: 0n },
+    {
+      readClient: v4Client({
+        payee_cap: () => Promise.resolve({ result: 50_000_000n }),
+        payee_spent: () => Promise.resolve({ result: 25_000_000n }),
+      }),
+      lacksTrustline: async () => false,
+    },
+  );
+  const r = pre.reasons.find((x) => x.code === 14);
+  assert.ok(r);
+  assert.match(r.detail, /25000000 stroops/);
+});
+
+test("v4: a task budget refuses payees it does not name", async () => {
+  const deps = {
+    readClient: v4Client({ session_payees: () => Promise.resolve({ result: ["GNAMED"] }) }),
+    lacksTrustline: async () => false,
+  };
+  const outside = await preflightReasons(ctx(), { to: "GOTHER", amount: 1n, taskId: 0n }, deps);
+  assert.deepEqual(outside.reasons.map((r) => r.code), [17]);
+  const inside = await preflightReasons(ctx(), { to: "GNAMED", amount: 1n, taskId: 0n }, deps);
+  assert.deepEqual(inside.reasons, []);
+});
+
+test("v4: the monthly budget narrows what can be spent now", async () => {
+  const pre = await preflightReasons(
+    ctx(),
+    { to: "GPAYEE", amount: 50_000_000n, taskId: 0n },
+    {
+      readClient: v4Client({
+        monthly_limit: () => Promise.resolve({ result: 200_000_000n }),
+        month_spent: () => Promise.resolve({ result: 160_000_000n }),
+      }),
+      lacksTrustline: async () => false,
+    },
+  );
+  assert.equal(pre.budget.monthly?.remaining, 40_000_000n);
+  assert.equal(pre.budget.spendableNow, 40_000_000n);
+  assert.deepEqual(pre.reasons.map((r) => r.code), [15]);
+});
+
+test("pre-v4 treasuries read without any of the v4 limits", async () => {
+  const pre = await preflightReasons(
+    ctx(),
+    { to: "GPAYEE", amount: 1n, taskId: 0n },
+    { readClient: readClient(), lacksTrustline: async () => false },
+  );
+  assert.equal(pre.budget.monthly, null);
+  assert.deepEqual(pre.budget.taskPayees, []);
+});

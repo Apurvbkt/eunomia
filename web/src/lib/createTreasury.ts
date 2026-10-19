@@ -15,8 +15,13 @@ export interface TreasurySetup {
   token?: string;
   dailyXlm: number;
   perTaskXlm: number;
+  /** Most the agent may move per UTC calendar month. Left out or 0 = no monthly limit. */
+  monthlyXlm?: number;
   /** Payees approved from the start. */
   payees: string[];
+  /** Monthly caps on individual payees — e.g. the agent's own float address. A cap does not
+   *  approve its payee; list it in `payees` as well. */
+  payeeCaps?: Array<{ payee: string; capXlm: number }>;
   /** An agent key the owner already holds the public half of (eunomia-mcp init). */
   leash?: { agent: string; capXlm: number; hours: number };
   /** XLM moved from the owner into the treasury in the same transaction. */
@@ -56,7 +61,9 @@ export function factorySetupArgs(owner: string, s: TreasurySetup, nowSec: number
     token: s.token ?? XLM_SAC,
     daily_limit: toStroops(s.dailyXlm),
     per_task_limit: toStroops(s.perTaskXlm),
+    monthly_limit: toStroops(s.monthlyXlm ?? 0),
     payees: s.payees,
+    payee_caps: (s.payeeCaps ?? []).map((c) => ({ payee: c.payee, cap: toStroops(c.capXlm) })),
     leash: s.leash
       ? [
           {

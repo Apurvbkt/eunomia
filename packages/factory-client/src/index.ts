@@ -50,7 +50,8 @@ export interface Leash {
 export interface Setup {
   daily_limit: i128;
   /**
- * Amount of `token` moved from the owner into the treasury (0 = unfunded).
+ * Amount of `token` deposited from the owner into the treasury (0 = unfunded). Refused
+ * as a whole if it exceeds the factory's deposit cap.
  */
 fund: i128;
   /**
@@ -59,9 +60,17 @@ fund: i128;
  */
 leash: Array<Leash>;
   /**
+ * Most the agent may move per UTC calendar month (0 = no monthly limit).
+ */
+monthly_limit: i128;
+  /**
  * Owner of the funds: becomes the treasury's admin AND root agent (as the app did).
  */
 owner: string;
+  /**
+ * Monthly caps on individual payees (may be empty). A cap does not approve its payee.
+ */
+payee_caps: Array<PayeeCap>;
   /**
  * Payees approved from the start (may be empty).
  */
@@ -81,6 +90,15 @@ salt: Buffer;
 token: string;
 }
 
+
+/**
+ * A monthly ceiling on what one payee may receive (v4).
+ */
+export interface PayeeCap {
+  cap: i128;
+  payee: string;
+}
+
 export interface Client {
   /**
    * Construct and simulate a create transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -98,6 +116,12 @@ export interface Client {
   registry: (options?: MethodOptions) => Promise<AssembledTransaction<string>>
 
   /**
+   * Construct and simulate a deposit_cap transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * The deposit cap every treasury from this factory is born with (0 = uncapped).
+   */
+  deposit_cap: (options?: MethodOptions) => Promise<AssembledTransaction<i128>>
+
+  /**
    * Construct and simulate a treasury_wasm transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    */
   treasury_wasm: (options?: MethodOptions) => Promise<AssembledTransaction<Buffer>>
@@ -106,7 +130,7 @@ export interface Client {
 export class Client extends ContractClient {
   static async deploy<T = Client>(
         /** Constructor/Initialization Args for the contract's `__constructor` method */
-        {treasury_wasm, registry}: {treasury_wasm: Buffer, registry: string},
+        {treasury_wasm, registry, deposit_cap}: {treasury_wasm: Buffer, registry: string, deposit_cap: i128},
     /** Options for initializing a Client as well as for calling a method, with extras specific to deploying. */
     options: MethodOptions &
       Omit<ContractClientOptions, "contractId"> & {
@@ -118,15 +142,17 @@ export class Client extends ContractClient {
         format?: "hex" | "base64";
       }
   ): Promise<AssembledTransaction<T>> {
-    return ContractClient.deploy({treasury_wasm, registry}, options)
+    return ContractClient.deploy({treasury_wasm, registry, deposit_cap}, options)
   }
   constructor(public readonly options: ContractClientOptions) {
     super(
       new ContractSpec([ "AAAAAQAAAFNBIHRpbWUtYm91bmQsIHNwZW5kLWNhcHBlZCBhZ2VudCBjcmVkZW50aWFsIHRvIHN0YXJ0IHRoZSB0cmVhc3VyeSB3aXRoICh0aGUgTGVhc2gpLgAAAAAAAAAABUxlYXNoAAAAAAAAAwAAAAAAAAAFYWdlbnQAAAAAAAATAAAAAAAAAAVsaW1pdAAAAAAAAAsAAAAAAAAAC3ZhbGlkX3VudGlsAAAAAAY=",
-        "AAAAAQAAAEpFdmVyeXRoaW5nIGEgdHJlYXN1cnkgbmVlZHMgdG8gYmUgdXNlZnVsIG9uIHRoZSBmaXJzdCBsZWRnZXIgaXQgZXhpc3RzIGluLgAAAAAAAAAAAAVTZXR1cAAAAAAAAAkAAAAAAAAAC2RhaWx5X2xpbWl0AAAAAAsAAABIQW1vdW50IG9mIGB0b2tlbmAgbW92ZWQgZnJvbSB0aGUgb3duZXIgaW50byB0aGUgdHJlYXN1cnkgKDAgPSB1bmZ1bmRlZCkuAAAABGZ1bmQAAAALAAAAo1N0YXJ0IGEgTGVhc2ggZm9yIGFuIGFnZW50IGtleSByaWdodCBhd2F5OiBlbXB0eSA9IG5vbmUsIG9uZSBlbnRyeSA9IHRoYXQgYWdlbnQuCihBIGBWZWNgIHJhdGhlciB0aGFuIGFuIGBPcHRpb25gOiB0aGUgU0RLJ3Mgc3BlYyBjYW5ub3QgY2FycnkgYW4gb3B0aW9uYWwgc3RydWN0LikAAAAABWxlYXNoAAAAAAAD6gAAB9AAAAAFTGVhc2gAAAAAAABRT3duZXIgb2YgdGhlIGZ1bmRzOiBiZWNvbWVzIHRoZSB0cmVhc3VyeSdzIGFkbWluIEFORCByb290IGFnZW50IChhcyB0aGUgYXBwIGRpZCkuAAAAAAAABW93bmVyAAAAAAAAEwAAAC5QYXllZXMgYXBwcm92ZWQgZnJvbSB0aGUgc3RhcnQgKG1heSBiZSBlbXB0eSkuAAAAAAAGcGF5ZWVzAAAAAAPqAAAAEwAAAAAAAAAOcGVyX3Rhc2tfbGltaXQAAAAAAAsAAABMUmVjb3JkIHRoZSB0cmVhc3VyeSB1bmRlciB0aGUgb3duZXIgaW4gdGhlIHJlZ2lzdHJ5IChjcm9zcy1kZXZpY2UgcmVjb3ZlcnkpLgAAAAhyZWdpc3RlcgAAAAEAAABOQ2FsbGVyLWNob3NlbjsgdGhlIHRyZWFzdXJ5IGFkZHJlc3MgaXMgZGVyaXZlZCBmcm9tIHRoZSBmYWN0b3J5IGFuZCB0aGlzIHNhbHQuAAAAAAAEc2FsdAAAA+4AAAAgAAAAMVNFUC00MSAvIFNBQyB0b2tlbiB0aGUgdHJlYXN1cnkgaG9sZHMgYW5kIHNwZW5kcy4AAAAAAAAFdG9rZW4AAAAAAAAT",
+        "AAAAAQAAAEpFdmVyeXRoaW5nIGEgdHJlYXN1cnkgbmVlZHMgdG8gYmUgdXNlZnVsIG9uIHRoZSBmaXJzdCBsZWRnZXIgaXQgZXhpc3RzIGluLgAAAAAAAAAAAAVTZXR1cAAAAAAAAAsAAAAAAAAAC2RhaWx5X2xpbWl0AAAAAAsAAACIQW1vdW50IG9mIGB0b2tlbmAgZGVwb3NpdGVkIGZyb20gdGhlIG93bmVyIGludG8gdGhlIHRyZWFzdXJ5ICgwID0gdW5mdW5kZWQpLiBSZWZ1c2VkCmFzIGEgd2hvbGUgaWYgaXQgZXhjZWVkcyB0aGUgZmFjdG9yeSdzIGRlcG9zaXQgY2FwLgAAAARmdW5kAAAACwAAAKNTdGFydCBhIExlYXNoIGZvciBhbiBhZ2VudCBrZXkgcmlnaHQgYXdheTogZW1wdHkgPSBub25lLCBvbmUgZW50cnkgPSB0aGF0IGFnZW50LgooQSBgVmVjYCByYXRoZXIgdGhhbiBhbiBgT3B0aW9uYDogdGhlIFNESydzIHNwZWMgY2Fubm90IGNhcnJ5IGFuIG9wdGlvbmFsIHN0cnVjdC4pAAAAAAVsZWFzaAAAAAAAA+oAAAfQAAAABUxlYXNoAAAAAAAARk1vc3QgdGhlIGFnZW50IG1heSBtb3ZlIHBlciBVVEMgY2FsZW5kYXIgbW9udGggKDAgPSBubyBtb250aGx5IGxpbWl0KS4AAAAAAA1tb250aGx5X2xpbWl0AAAAAAAACwAAAFFPd25lciBvZiB0aGUgZnVuZHM6IGJlY29tZXMgdGhlIHRyZWFzdXJ5J3MgYWRtaW4gQU5EIHJvb3QgYWdlbnQgKGFzIHRoZSBhcHAgZGlkKS4AAAAAAAAFb3duZXIAAAAAAAATAAAAU01vbnRobHkgY2FwcyBvbiBpbmRpdmlkdWFsIHBheWVlcyAobWF5IGJlIGVtcHR5KS4gQSBjYXAgZG9lcyBub3QgYXBwcm92ZSBpdHMgcGF5ZWUuAAAAAApwYXllZV9jYXBzAAAAAAPqAAAH0AAAAAhQYXllZUNhcAAAAC5QYXllZXMgYXBwcm92ZWQgZnJvbSB0aGUgc3RhcnQgKG1heSBiZSBlbXB0eSkuAAAAAAAGcGF5ZWVzAAAAAAPqAAAAEwAAAAAAAAAOcGVyX3Rhc2tfbGltaXQAAAAAAAsAAABMUmVjb3JkIHRoZSB0cmVhc3VyeSB1bmRlciB0aGUgb3duZXIgaW4gdGhlIHJlZ2lzdHJ5IChjcm9zcy1kZXZpY2UgcmVjb3ZlcnkpLgAAAAhyZWdpc3RlcgAAAAEAAABOQ2FsbGVyLWNob3NlbjsgdGhlIHRyZWFzdXJ5IGFkZHJlc3MgaXMgZGVyaXZlZCBmcm9tIHRoZSBmYWN0b3J5IGFuZCB0aGlzIHNhbHQuAAAAAAAEc2FsdAAAA+4AAAAgAAAAMVNFUC00MSAvIFNBQyB0b2tlbiB0aGUgdHJlYXN1cnkgaG9sZHMgYW5kIHNwZW5kcy4AAAAAAAAFdG9rZW4AAAAAAAAT",
+        "AAAAAQAAADVBIG1vbnRobHkgY2VpbGluZyBvbiB3aGF0IG9uZSBwYXllZSBtYXkgcmVjZWl2ZSAodjQpLgAAAAAAAAAAAAAIUGF5ZWVDYXAAAAACAAAAAAAAAANjYXAAAAAACwAAAAAAAAAFcGF5ZWUAAAAAAAAT",
         "AAAAAAAAASFEZXBsb3kgYSB0cmVhc3VyeSBhbmQgc2V0IGl0IHVwIOKAlCBvbmUgb3duZXIgc2lnbmF0dXJlIGZvciB0aGUgd2hvbGUgdGhpbmcuCgpPcmRlciBtYXR0ZXJzIGZvciBhdG9taWNpdHkgb25seSBpbiB0aGUgc2Vuc2UgdGhhdCBhbnkgcmVmdXNhbCAoYW4gaW5jb2hlcmVudApwb2xpY3kgaW4gdGhlIGNvbnN0cnVjdG9yLCBhbiBpbnZhbGlkIExlYXNoLCBhbiB1bmZ1bmRlZCBvd25lcikgYWJvcnRzIHRoZSBlbnRpcmUKdHJhbnNhY3Rpb246IG5vIGhhbGYtY29uZmlndXJlZCB0cmVhc3VyeSBjYW4gZXhpc3QuAAAAAAAABmNyZWF0ZQAAAAAAAQAAAAAAAAABcwAAAAAAB9AAAAAFU2V0dXAAAAAAAAABAAAAEw==",
         "AAAAAAAAAAAAAAAIcmVnaXN0cnkAAAAAAAAAAQAAABM=",
-        "AAAAAAAAAJ1QaW5zIHRoZSB0cmVhc3VyeSBjb2RlIGFuZCB0aGUgcmVnaXN0cnkuIEltbXV0YWJsZSBhZnRlciBkZXBsb3kgKG5vIHNldHRlcnMpOiBhCmZhY3RvcnkgdGhhdCBjb3VsZCBiZSByZS1wb2ludGVkIHdvdWxkIGJlIGEgd2F5IHRvIGhhbmQgdXNlcnMgZGlmZmVyZW50IGNvZGUuAAAAAAAADV9fY29uc3RydWN0b3IAAAAAAAACAAAAAAAAAA10cmVhc3VyeV93YXNtAAAAAAAD7gAAACAAAAAAAAAACHJlZ2lzdHJ5AAAAEwAAAAA=",
+        "AAAAAAAAAE1UaGUgZGVwb3NpdCBjYXAgZXZlcnkgdHJlYXN1cnkgZnJvbSB0aGlzIGZhY3RvcnkgaXMgYm9ybiB3aXRoICgwID0gdW5jYXBwZWQpLgAAAAAAAAtkZXBvc2l0X2NhcAAAAAAAAAAAAQAAAAs=",
+        "AAAAAAAAAPpQaW5zIHRoZSB0cmVhc3VyeSBjb2RlLCB0aGUgcmVnaXN0cnkgYW5kIHRoZSBkZXBvc2l0IGNhcC4gSW1tdXRhYmxlIGFmdGVyIGRlcGxveSAobm8Kc2V0dGVycyk6IGEgZmFjdG9yeSB0aGF0IGNvdWxkIGJlIHJlLXBvaW50ZWQgd291bGQgYmUgYSB3YXkgdG8gaGFuZCB1c2VycyBkaWZmZXJlbnQKY29kZSwgYW5kIG9uZSB3aG9zZSBjYXAgY291bGQgYmUgcmFpc2VkIHdvdWxkIG1ha2UgdGhlIGJldGEgYm91bmQgYSBwcm9taXNlIG9ubHkuAAAAAAANX19jb25zdHJ1Y3RvcgAAAAAAAAMAAAAAAAAADXRyZWFzdXJ5X3dhc20AAAAAAAPuAAAAIAAAAAAAAAAIcmVnaXN0cnkAAAATAAAAAAAAAAtkZXBvc2l0X2NhcAAAAAALAAAAAA==",
         "AAAAAAAAAAAAAAANdHJlYXN1cnlfd2FzbQAAAAAAAAAAAAABAAAD7gAAACA=" ]),
       options
     )
@@ -134,6 +160,7 @@ export class Client extends ContractClient {
   public readonly fromJSON = {
     create: this.txFromJSON<string>,
         registry: this.txFromJSON<string>,
+        deposit_cap: this.txFromJSON<i128>,
         treasury_wasm: this.txFromJSON<Buffer>
   }
 }

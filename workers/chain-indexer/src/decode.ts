@@ -47,6 +47,11 @@ export const TREASURY_KINDS = [
   "payee_rm",
   "paused",
   "agent",
+  // v4
+  "deposit",
+  "monthly",
+  "payee_cap",
+  "budget",
 ] as const;
 
 const decode = (b64: string): unknown => scValToNative(xdr.ScVal.fromXDR(b64, "base64"));
@@ -69,7 +74,9 @@ export function toRegistration(e: RpcEvent, network: string): Registration | nul
 
 /** A treasury event as a stored row. Payloads are tuples whose first element is the address
  *  the event is about and, where present, the second is the amount — except `session`
- *  (agent, valid_until, limit) and `limits` (daily, per_task). */
+ *  (agent, valid_until, limit) and `limits` (daily, per_task), and the v4 events, which put
+ *  their address in the second topic: `deposit` (from) -> amount, `payee_cap` (payee) -> cap,
+ *  `budget` (agent) -> (valid_until, limit, payees), and `monthly` -> limit. */
 export function toEventRow(e: RpcEvent, network: string): EventRow {
   const kind = String(decode(e.topic[0]));
   const value = decode(e.value);
@@ -83,6 +90,18 @@ export function toEventRow(e: RpcEvent, network: string): EventRow {
       break;
     case "limits":
       amount = str(tuple[0]); // daily limit
+      break;
+    case "monthly":
+      amount = str(tuple[0]);
+      break;
+    case "deposit":
+    case "payee_cap":
+      counterparty = e.topic[1] ? str(decode(e.topic[1])) : null;
+      amount = str(tuple[0]);
+      break;
+    case "budget":
+      counterparty = e.topic[1] ? str(decode(e.topic[1])) : null;
+      amount = str(tuple[1]); // the budget's cap
       break;
     case "paused":
     case "revoked":
