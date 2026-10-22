@@ -23,6 +23,7 @@ import {
   nativeToScVal,
   xdr,
 } from "@stellar/stellar-sdk";
+import { assertAuthMatches } from "./authCheck";
 
 /** The one RPC capability this needs, narrowed so it unit-tests without a network. */
 export interface SimulatingServer {
@@ -61,6 +62,7 @@ export async function deployFromSmartWallet(
 ): Promise<string> {
   const retval = await runAsSmartWallet(
     deps,
+    walletAddress,
     Operation.createCustomContract({
       address: new Address(walletAddress),
       wasmHash: Buffer.from(wasmHash, "hex"),
@@ -85,6 +87,7 @@ export async function transferFromSmartWallet(
 ): Promise<void> {
   await runAsSmartWallet(
     deps,
+    walletAddress,
     new Contract(sac).call(
       "transfer",
       new Address(walletAddress).toScVal(),
@@ -96,14 +99,19 @@ export async function transferFromSmartWallet(
 
 /** Any contract call as the wallet — the factory's one-signature setup rides on this: the
  *  wallet authorises the root call and every sub-call under it in one signed entry. */
-export async function invokeFromSmartWallet(deps: SmartWalletDeps, op: xdr.Operation): Promise<xdr.ScVal> {
-  return runAsSmartWallet(deps, op);
+export async function invokeFromSmartWallet(
+  deps: SmartWalletDeps,
+  walletAddress: string,
+  op: xdr.Operation,
+): Promise<xdr.ScVal> {
+  return runAsSmartWallet(deps, walletAddress, op);
 }
 
 /** Simulate an operation as the wallet, have the passkey sign the auth it requires, and hand
  *  the result to the relay. Returns whatever the call returned. */
 async function runAsSmartWallet(
   deps: SmartWalletDeps,
+  walletAddress: string,
   op: xdr.Operation,
 ): Promise<xdr.ScVal> {
   const tx = new TransactionBuilder(new Account(deps.simulationSource, "0"), {
@@ -122,10 +130,15 @@ async function runAsSmartWallet(
     throw new Error(PREPARE_FAILED);
   }
 
-  const signed = await Promise.all((sim.result.auth ?? []).map((e) => deps.signAuthEntry(e)));
+  // Simulation came from the RPC; the host function did not. Nothing is signed until every
+  // entry is this wallet authorising exactly that call (authCheck.ts).
+  const fn = op.body().invokeHostFunctionOp().hostFunction();
+  const auth = sim.result.auth ?? [];
+  assertAuthMatches(fn, auth, walletAddress);
+  const signed = await Promise.all(auth.map((e) => deps.signAuthEntry(e)));
 
   await deps.relay(
-    op.body().invokeHostFunctionOp().hostFunction().toXDR("base64"),
+    fn.toXDR("base64"),
     signed.map((e) => e.toXDR("base64")),
   );
 

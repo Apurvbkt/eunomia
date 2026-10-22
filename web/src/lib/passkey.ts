@@ -10,6 +10,7 @@
 //
 // Raw WebAuthn and kit errors never reach the user.
 
+import { assertAssembledAuth } from "./authCheck";
 import { walletOnlyLimits } from "./recovery";
 
 export interface PasskeyIdentity {
@@ -165,6 +166,7 @@ async function buildPasskeyBackend(): Promise<PasskeyBackend> {
       // Persistent storage: a recovery signer that silently expired would be a
       // recovery signer that does not exist on the day it is needed.
       const tx = await kit.addEd25519(publicKey, limits, SignerStore.Persistent);
+      if (kit.wallet) assertAssembledAuth(tx, kit.wallet.options.contractId);
       return kit.sign(tx);
     },
     addSecp256r1Signer: async (wallet, keyId, publicKey, secret) => {
@@ -178,6 +180,7 @@ async function buildPasskeyBackend(): Promise<PasskeyBackend> {
         networkPassphrase: NETWORK_PASSPHRASE,
       });
       const tx = await kit.addSecp256r1(keyId, publicKey, undefined, SignerStore.Persistent);
+      assertAssembledAuth(tx, wallet);
       return kit.sign(tx, Ed25519Signer.fromSecret(secret));
     },
   };

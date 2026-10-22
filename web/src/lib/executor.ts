@@ -9,6 +9,7 @@
 // pay the fee. It signs the assembled transaction with the passkey and hands it to the relay,
 // which submits from its own channel account.
 import type { xdr } from "@stellar/stellar-sdk";
+import { assertAssembledAuth } from "./authCheck";
 import type { ContractSigner } from "./walletSigner";
 import type { PasskeyWallet } from "./passkey";
 
@@ -77,7 +78,10 @@ export function makePasskeyExecutor(
       signTransaction: () =>
         Promise.reject(new Error("A passkey session signs transactions, not raw XDR.")),
     },
-    submit: async (tx) => relay(await wallet.sign(tx)),
+    submit: async (tx) => {
+      assertAssembledAuth(tx, contractId);
+      return relay(await wallet.sign(tx));
+    },
     deployContract,
     transferXlm,
     ...(invoke ? { invoke } : {}),

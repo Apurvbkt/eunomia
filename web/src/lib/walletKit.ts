@@ -430,7 +430,7 @@ export async function executorFor(address: string): Promise<TxExecutor> {
         deployFromSmartWallet(asWallet, address, wasmHash, constructorArgs),
       (to, amountStroops) =>
         transferFromSmartWallet(asWallet, address, XLM_SAC, to, amountStroops),
-      (op) => invokeFromSmartWallet(asWallet, op),
+      (op) => invokeFromSmartWallet(asWallet, address, op),
     );
   }
   return makeWalletExecutor(address, walletSignerFor(address));

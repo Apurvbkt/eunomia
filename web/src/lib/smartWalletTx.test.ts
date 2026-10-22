@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { Address, nativeToScVal, scValToNative, xdr } from "@stellar/stellar-sdk";
+import { Address, nativeToScVal, scValToNative, xdr, type Operation, type Transaction } from "@stellar/stellar-sdk";
 import {
   deployFromSmartWallet,
   transferFromSmartWallet,
   type SimulatingServer,
 } from "./smartWalletTx";
+import { AUTH_MISMATCH } from "./authCheck";
 import { classifyHostFunction } from "./hostFunction";
 
 const WALLET = "CAYWNXHANRY5GSJAZOR4YTKBKNOKTCITE52ZRKDKCAWLDTYWFFVFSPAZ";
@@ -39,15 +40,51 @@ function addressEntry(address: string): xdr.SorobanAuthorizationEntry {
   });
 }
 
-function server(over: Partial<Record<string, unknown>> = {}): SimulatingServer {
-  return {
-    simulateTransaction: vi.fn().mockResolvedValue({
-      result: {
-        retval: new Address(DEPLOYED).toScVal(),
-        auth: [addressEntry(WALLET)],
-      },
-      ...over,
+/** The entry an honest simulation returns: the wallet authorising exactly the transaction's
+ *  own host function, expiration left for the signer to set. */
+function honestEntry(tx: Transaction): xdr.SorobanAuthorizationEntry {
+  const fn = (tx.operations[0] as Operation.InvokeHostFunction).func;
+  const root =
+    fn.switch().name === "hostFunctionTypeCreateContractV2"
+      ? xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeCreateContractV2HostFn(fn.createContractV2())
+      : xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(fn.invokeContract());
+  const entry = addressEntry(WALLET);
+  entry.rootInvocation(new xdr.SorobanAuthorizedInvocation({ function: root, subInvocations: [] }));
+  return entry;
+}
+
+/** What a hostile RPC would slip in next to the real entry: the wallet's USDC to an attacker. */
+function drainEntry(): xdr.SorobanAuthorizationEntry {
+  const entry = addressEntry(WALLET);
+  entry.rootInvocation(
+    new xdr.SorobanAuthorizedInvocation({
+      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+        new xdr.InvokeContractArgs({
+          contractAddress: new Address(XLM_SAC).toScAddress(),
+          functionName: "transfer",
+          args: [new Address(WALLET).toScVal(), new Address(SOURCE).toScVal(), nativeToScVal(1n, { type: "i128" })],
+        }),
+      ),
+      subInvocations: [],
     }),
+  );
+  return entry;
+}
+
+function server(
+  over: Partial<Record<string, unknown>> = {},
+  extra: (tx: Transaction) => xdr.SorobanAuthorizationEntry[] = () => [],
+): SimulatingServer {
+  return {
+    simulateTransaction: vi.fn().mockImplementation((tx: Transaction) =>
+      Promise.resolve({
+        result: {
+          retval: new Address(DEPLOYED).toScVal(),
+          auth: [honestEntry(tx), ...extra(tx)],
+        },
+        ...over,
+      }),
+    ),
   } as unknown as SimulatingServer;
 }
 
@@ -143,6 +180,35 @@ describe("deployFromSmartWallet", () => {
     expect(Address.fromScVal(from).toString()).toBe(WALLET);
     expect(Address.fromScVal(to).toString()).toBe(TREASURY);
     expect(scValToNative(amount)).toBe(5_000_000n);
+  });
+
+  it("signs nothing when the RPC slips an extra entry in next to the real one", async () => {
+    // M1: the passkey prompt cannot show what an entry authorises, so a hostile RPC could
+    // have one touch sign a transfer out of the wallet along with the deploy.
+    const d = deps({ server: server({}, () => [drainEntry()]) });
+
+    await expect(deployFromSmartWallet(d, WALLET, WASM, ARGS)).rejects.toThrow(AUTH_MISMATCH);
+    expect(d.signAuthEntry).not.toHaveBeenCalled();
+    expect(d.relay).not.toHaveBeenCalled();
+  });
+
+  it("signs nothing when the RPC sets the expiration itself", async () => {
+    // A far-off expiration would leave a signed entry replayable long after this session.
+    const late = (tx: Transaction) => {
+      const e = honestEntry(tx);
+      e.credentials().address().signatureExpirationLedger(99_999_999);
+      return e;
+    };
+    const d = deps({
+      server: {
+        simulateTransaction: vi.fn().mockImplementation((tx: Transaction) =>
+          Promise.resolve({ result: { retval: new Address(DEPLOYED).toScVal(), auth: [late(tx)] } }),
+        ),
+      } as unknown as SimulatingServer,
+    });
+
+    await expect(transferFromSmartWallet(d, WALLET, XLM_SAC, DEPLOYED, 1n)).rejects.toThrow(AUTH_MISMATCH);
+    expect(d.signAuthEntry).not.toHaveBeenCalled();
   });
 
   it("surfaces a simulation failure as something the user can act on", async () => {
