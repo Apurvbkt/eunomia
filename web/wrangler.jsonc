@@ -13,13 +13,23 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
-  // Per client IP, per Cloudflare location. The relay pays a fee for every call it admits.
+  // The relay pays a fee for every call it admits. Per client IP and per signing wallet, each
+  // per Cloudflare location; neither bounds the bill on its own, the daily budget below does.
   "ratelimits": [
-    { "name": "RELAY_LIMITER", "namespace_id": "4401", "simple": { "limit": 20, "period": 60 } }
+    { "name": "RELAY_LIMITER", "namespace_id": "4401", "simple": { "limit": 20, "period": 60 } },
+    { "name": "RELAY_WALLET_LIMITER", "namespace_id": "4402", "simple": { "limit": 10, "period": 60 } }
   ],
-  "vars": {
-    "RELAY_NETWORK": "testnet"
+  // The day's fee total, shared by every instance (worker/relayBudget.ts).
+  "durable_objects": {
+    "bindings": [{ "name": "RELAY_BUDGET", "class_name": "RelayBudget" }]
   },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayBudget"] }],
+  "vars": {
+    "RELAY_NETWORK": "testnet",
+    "RELAY_DAILY_BUDGET_XLM": "200"
+  },
+  // pubnet also needs RELAY_RPC_URL, RELAY_FACTORY_ID and RELAY_DAILY_BUDGET_XLM; optional
+  // RELAY_MAX_FEE_XLM (default 1) and RELAY_MIN_BALANCE_XLM (default 5).
   // secrets: DISPENSER_SECRET (testnet fee + faucet key) or RELAY_SECRET (wrangler secret put …)
   "observability": { "enabled": true }
 }

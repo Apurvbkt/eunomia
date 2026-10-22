@@ -131,6 +131,57 @@ describe("submitHostFunction", () => {
     expect(tx.sequence).toBe("43");
   });
 
+  it("prices the transaction once, before anything is sent, and sends nothing it refuses (M2)", async () => {
+    const s = server();
+    const charge = vi.fn().mockResolvedValue(undefined);
+    await submitHostFunction({ ...deps(s), charge }, FUNC, [signedEntry()]);
+
+    // 0.01 XLM inclusion plus the resource fee padded by 30%: the most the transaction may cost.
+    expect(charge).toHaveBeenCalledWith(100_000n + (25_102n * 130n) / 100n);
+
+    const refusing = server();
+    const no = vi.fn().mockRejectedValue(new Error("over budget"));
+    await expect(submitHostFunction({ ...deps(refusing), charge: no }, FUNC, [signedEntry()])).rejects.toThrow(/over budget/);
+    expect(refusing.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rebuilds on the fresh sequence when another request took this one", async () => {
+    // Two requests read the same sequence; the second is rejected txBadSeq before anything
+    // runs, so it is rebuilt and sent again — and charged only once.
+    const badSeq = new xdr.TransactionResult({
+      feeCharged: xdr.Int64.fromString("0"),
+      result: xdr.TransactionResultResult.txBadSeq(),
+      ext: new xdr.TransactionResultExt(0),
+    });
+    const s = server({
+      getAccount: vi
+        .fn()
+        .mockResolvedValueOnce({ sequenceNumber: () => "42" })
+        .mockResolvedValueOnce({ sequenceNumber: () => "43" }),
+      sendTransaction: vi
+        .fn()
+        .mockResolvedValueOnce({ hash: "H1", status: "ERROR", errorResult: badSeq })
+        .mockResolvedValueOnce({ hash: "H2", status: "PENDING" }),
+    });
+    const charge = vi.fn().mockResolvedValue(undefined);
+
+    await expect(submitHostFunction({ ...deps(s), charge }, FUNC, [signedEntry()])).resolves.toMatchObject({ hash: "H2" });
+    const sent = (s.sendTransaction as ReturnType<typeof vi.fn>).mock.calls.map(([tx]) => (tx as { sequence: string }).sequence);
+    expect(sent).toEqual(["43", "44"]);
+    expect(charge).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after a few sequence races instead of looping", async () => {
+    const badSeq = new xdr.TransactionResult({
+      feeCharged: xdr.Int64.fromString("0"),
+      result: xdr.TransactionResultResult.txBadSeq(),
+      ext: new xdr.TransactionResultExt(0),
+    });
+    const s = server({ sendTransaction: vi.fn().mockResolvedValue({ hash: "H", status: "ERROR", errorResult: badSeq }) });
+    await expect(submitHostFunction(deps(s), FUNC, [signedEntry()])).rejects.toBeInstanceOf(RelaySubmitError);
+    expect(s.sendTransaction).toHaveBeenCalledTimes(3);
+  });
+
   it("reports a rejected transaction rather than a hash", async () => {
     const s = server({
       sendTransaction: vi.fn().mockResolvedValue({ hash: "H", status: "ERROR", errorResult: { x: 1 } }),

@@ -39,9 +39,26 @@ export interface SubmitDeps {
   /** How many times to ask whether the transaction made it into a ledger. */
   pollAttempts?: number;
   wait?: (ms: number) => Promise<void>;
+  /** Called once with the most the transaction may cost, before anything is sent; throws to
+   *  stop it. The caller's spending limits live here, so nothing is sent unpriced. */
+  charge?: (stroops: bigint) => Promise<void>;
 }
 
 export class RelaySubmitError extends Error {}
+
+/** Sends under the fee account's sequence before giving up on a race with another request. */
+const SEQUENCE_ATTEMPTS = 3;
+
+/** Whether a rejection is the fee account's sequence having moved under us: two requests
+ *  read the same sequence and only the first to land can use it. Nothing ran and no fee was
+ *  taken, so the transaction is rebuilt on the new sequence and sent again. */
+function isBadSequence(errorResult: unknown): boolean {
+  try {
+    return (errorResult as xdr.TransactionResult).result().switch().name === "txBadSeq";
+  } catch {
+    return false;
+  }
+}
 
 /** Inclusion fee in stroops (0.01 XLM). The network floor loses the moment there is a queue. */
 const INCLUSION_FEE = "100000";
@@ -69,7 +86,7 @@ export async function submitHostFunction(
   auth: xdr.SorobanAuthorizationEntry[],
 ): Promise<{ hash: string; status: string }> {
   const address = deps.keypair.publicKey();
-  const sequence = (await deps.server.getAccount(address)).sequenceNumber();
+  let sequence = (await deps.server.getAccount(address)).sequenceNumber();
 
   const build = (sorobanData?: xdr.SorobanTransactionData) =>
     new TransactionBuilder(new Account(address, sequence), {
@@ -96,13 +113,21 @@ export async function submitHostFunction(
   // Deliberately not rpc.assembleTransaction: it adds minResourceFee to the base fee, and
   // since stellar-base 14.1.0 build() adds the resource fee again — the fee comes out double.
   // Handing sorobanData to the builder counts it exactly once.
-  const tx = build(padResourceFee(sim.transactionData.build()));
-  tx.sign(deps.keypair);
+  const data = padResourceFee(sim.transactionData.build());
+  let tx = build(data);
+  await deps.charge?.(BigInt(tx.fee));
 
-  const sent = await deps.server.sendTransaction(tx);
-  assertAccepted(sent);
-
-  return { hash: sent.hash, status: await settle(deps, sent.hash, sent.status) };
+  for (let attempt = 1; ; attempt++) {
+    tx.sign(deps.keypair);
+    const sent = await deps.server.sendTransaction(tx);
+    if (sent.status === "ERROR" && isBadSequence(sent.errorResult) && attempt < SEQUENCE_ATTEMPTS) {
+      sequence = (await deps.server.getAccount(address)).sequenceNumber();
+      tx = build(data);
+      continue;
+    }
+    assertAccepted(sent);
+    return { hash: sent.hash, status: await settle(deps, sent.hash, sent.status) };
+  }
 }
 
 /** Submit an already-signed transaction envelope — passkey-kit's smart-wallet deployment,
@@ -124,6 +149,9 @@ export async function submitEnvelope(
     inner as Transaction,
     deps.networkPassphrase,
   );
+  // A fee bump has no sequence of its own (it rides on the inner transaction's), so it cannot
+  // race other requests; it is priced like everything else.
+  await deps.charge?.(BigInt(tx.fee));
   tx.sign(deps.keypair);
 
   const sent = await deps.server.sendTransaction(tx);

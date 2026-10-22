@@ -377,12 +377,22 @@ The app creates through the v4 factory; the relay keeps admitting the v3.5 facto
 
 - **Relay per network.** `RELAY_NETWORK=testnet` (default) admits native-XLM moves, the
   factories and our treasury wasm. `pubnet` admits only `RELAY_FACTORY_ID` and the treasury
-  wasm — no native XLM (a v4 treasury is funded through `deposit`) — needs `RELAY_RPC_URL`,
-  and refuses to sponsor anything without the rate limiter bound.
-- **Rate limit.** `RELAY_LIMITER`: 20 requests a minute per client IP per Cloudflare location.
-  Cloudflare documents it as permissive and eventually consistent; a 120-request burst
-  returned 10 × 429. The real bounds stay admission (only our contracts) and a fee account
-  kept small.
+  wasm — no native XLM (a v4 treasury is funded through `deposit`) — needs `RELAY_RPC_URL`
+  and `RELAY_DAILY_BUDGET_XLM`, and refuses to sponsor anything without both limiters and
+  the budget bound.
+- **Rate limits.** `RELAY_LIMITER`: 20 requests a minute per client IP; `RELAY_WALLET_LIMITER`:
+  10 a minute per signing wallet; each per Cloudflare location. Cloudflare documents them as
+  permissive and eventually consistent; a 120-request burst returned 10 × 429. They slow a
+  caller down; they do not bound the bill.
+- **Fee limits (2026-10-22, review M2).** Every transaction is priced before it is sent
+  (inclusion fee plus the padded resource fee: the most it may cost) and refused when it
+  costs more than `RELAY_MAX_FEE_XLM` (default 1; a factory create measures 0.32 XLM of
+  resource fee), would leave the fee account under `RELAY_MIN_BALANCE_XLM` (pubnet default
+  5; logged as `fee account below floor`, the line to alert on), or would take the UTC day
+  past `RELAY_DAILY_BUDGET_XLM`. The day's total lives in one Durable Object (`RELAY_BUDGET`,
+  `worker/relayBudget.ts`) so every instance charges the same counter; an unreachable counter
+  refuses. Testnet runs with 200 XLM a day. A send rejected `txBadSeq` (two requests on the
+  same fee-account sequence) is rebuilt on the fresh sequence, up to three sends, charged once.
 - **Strict CSP** (`scripts/headers.mjs` → `dist/_headers`): `script-src 'self'` plus the hash
   of every inline script in the build (the docs' page-hash map changes with the docs, so the
   hashes are computed after `vite build`, CRLF-normalised the way the browser parses them),

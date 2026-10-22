@@ -10,11 +10,15 @@
 //
 // Mainnet differs from testnet in what it will pay for, not in how: no native-XLM transfers
 // (a v4 treasury is funded through its own `deposit`, admitted by wasm), the factory comes
-// from configuration, and a rate limiter is required — on mainnet the fee is real money.
+// from configuration, and the limiters and a daily fee budget are required — on mainnet the
+// fee is real money. Every transaction is priced before it is sent and refused when it costs
+// more than one call should, would take the day past its budget, or would leave the fee
+// account below its floor.
 //
 // Explicit .js extensions throughout: see the note in relayGuard.ts.
-import { Keypair, rpc, xdr } from "@stellar/stellar-sdk";
+import { Address, Keypair, rpc, xdr } from "@stellar/stellar-sdk";
 import { classifyHostFunction, hostFunctionFromEnvelope } from "./hostFunction.js";
+import type { FeeBudget } from "./relayBudget.js";
 import { allowedWasmHashes, authEntriesAreSafe, isRelayAllowed } from "./relayGuard.js";
 import { submitEnvelope, submitHostFunction } from "./relaySubmit.js";
 import { LEGACY_TREASURY_FACTORY_IDS, TREASURY_FACTORY_ID, TREASURY_WASM_HASH } from "./treasuryWasm.js";
@@ -30,11 +34,27 @@ export interface RelayEnv {
   RELAY_ALLOWED_WASM?: string;
   /** pubnet: the treasury factory to admit (testnet's is built in) */
   RELAY_FACTORY_ID?: string;
+  /** the most the relay spends on fees in one UTC day, in XLM; required on pubnet */
+  RELAY_DAILY_BUDGET_XLM?: string;
+  /** the most one transaction may cost, in XLM (default 1) */
+  RELAY_MAX_FEE_XLM?: string;
+  /** below this balance the fee account stops sponsoring, in XLM (pubnet default 5) */
+  RELAY_MIN_BALANCE_XLM?: string;
 }
 
 /** Cloudflare's rate-limiting binding has this shape; anything with it will do. */
 export interface RateLimiter {
   limit(opts: { key: string }): Promise<{ success: boolean }>;
+}
+
+/** What the host wires in around the handler. On pubnet all three are required. */
+export interface RelayGuards {
+  /** per client IP */
+  limiter?: RateLimiter;
+  /** per wallet: an IP is cheap to change, the wallet that signed is not hidden by it */
+  walletLimiter?: RateLimiter;
+  /** the day's total, shared by every instance */
+  budget?: FeeBudget;
 }
 
 export interface RelayNetwork {
@@ -43,8 +63,14 @@ export interface RelayNetwork {
   rpcUrl: string;
   /** contracts admitted by address */
   contracts: string[];
-  /** whether a rate limiter must be present before anything is sponsored */
+  /** whether the limiters and the budget must be present before anything is sponsored */
   requiresLimiter: boolean;
+  /** stroops; null means no daily total (testnet only) */
+  dailyBudget: bigint | null;
+  /** stroops */
+  maxTxFee: bigint;
+  /** stroops; 0 means no floor */
+  minBalance: bigint;
 }
 
 // Invisible characters smuggled into an env value have bitten this project twice (a BOM in
@@ -63,10 +89,27 @@ const csv = (v: string | undefined): string[] =>
 // moving their own funds.
 const TESTNET_NATIVE_SAC = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 
+/** An XLM amount from env as stroops; `fallback` when unset. Throws on anything that is not
+ *  a plain positive decimal — a typo in a spending limit must not read as "no limit". */
+export function xlmEnv(name: string, v: string | undefined, fallback: bigint | null): bigint | null {
+  const s = clean(v);
+  if (!s) return fallback;
+  const m = /^(\d+)(?:\.(\d{1,7}))?$/.exec(s);
+  if (!m) throw new Error(`${name} is not an XLM amount: "${s}"`);
+  const stroops = BigInt(m[1]) * 10_000_000n + BigInt((m[2] ?? "").padEnd(7, "0"));
+  if (stroops <= 0n) throw new Error(`${name} must be above zero`);
+  return stroops;
+}
+
+const XLM = 10_000_000n;
+
 /** What this deployment sponsors, from its env. Throws on a configuration that cannot be safe. */
 export function relayNetwork(env: RelayEnv): RelayNetwork {
   const name = clean(env.RELAY_NETWORK) || "testnet";
   const listed = csv(env.RELAY_ALLOWED_CONTRACTS);
+  // A factory create measures about 0.32 XLM of resource fee on testnet (0.42 padded); 1 XLM
+  // leaves room for that and refuses anything an order of magnitude dearer.
+  const maxTxFee = xlmEnv("RELAY_MAX_FEE_XLM", env.RELAY_MAX_FEE_XLM, XLM) as bigint;
   if (name === "testnet") {
     return {
       name,
@@ -74,11 +117,16 @@ export function relayNetwork(env: RelayEnv): RelayNetwork {
       rpcUrl: clean(env.RELAY_RPC_URL) || "https://soroban-testnet.stellar.org",
       contracts: [...listed, TESTNET_NATIVE_SAC, TREASURY_FACTORY_ID, ...LEGACY_TREASURY_FACTORY_IDS],
       requiresLimiter: false,
+      dailyBudget: xlmEnv("RELAY_DAILY_BUDGET_XLM", env.RELAY_DAILY_BUDGET_XLM, null),
+      maxTxFee,
+      minBalance: xlmEnv("RELAY_MIN_BALANCE_XLM", env.RELAY_MIN_BALANCE_XLM, null) ?? 0n,
     };
   }
   if (name === "pubnet") {
     const rpcUrl = clean(env.RELAY_RPC_URL);
     if (!rpcUrl) throw new Error("RELAY_RPC_URL is required on pubnet");
+    const dailyBudget = xlmEnv("RELAY_DAILY_BUDGET_XLM", env.RELAY_DAILY_BUDGET_XLM, null);
+    if (dailyBudget === null) throw new Error("RELAY_DAILY_BUDGET_XLM is required on pubnet");
     const factory = clean(env.RELAY_FACTORY_ID);
     return {
       name,
@@ -86,9 +134,62 @@ export function relayNetwork(env: RelayEnv): RelayNetwork {
       rpcUrl,
       contracts: factory ? [...listed, factory] : listed,
       requiresLimiter: true,
+      dailyBudget,
+      maxTxFee,
+      minBalance: xlmEnv("RELAY_MIN_BALANCE_XLM", env.RELAY_MIN_BALANCE_XLM, 5n * XLM) as bigint,
     };
   }
   throw new Error(`unknown RELAY_NETWORK "${name}"`);
+}
+
+/** Why the relay will not pay for this one, as the caller should hear it. */
+export class Refused extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** Every limit on money, checked against the priced transaction just before it is sent: the
+ *  per-call cap first (free), then the fee account's floor, and the day's budget last, so a
+ *  refusal on the way never spends budget. */
+export function feeGate(
+  net: Pick<RelayNetwork, "maxTxFee" | "minBalance" | "dailyBudget">,
+  budget: FeeBudget | undefined,
+  balance: () => Promise<bigint>,
+): (stroops: bigint) => Promise<void> {
+  return async (stroops) => {
+    if (stroops > net.maxTxFee) {
+      console.error(`[relay] refused a ${stroops}-stroop transaction (cap ${net.maxTxFee})`);
+      throw new Refused(403, "Not allowed.");
+    }
+    if (net.minBalance > 0n) {
+      const held = await balance();
+      if (held - stroops < net.minBalance) {
+        // The line to alert on: sponsorship is off until the account is topped up.
+        console.error(`[relay] fee account below floor: ${held} stroops (floor ${net.minBalance})`);
+        throw new Refused(503, "The relay is paused. Try again later.");
+      }
+    }
+    if (net.dailyBudget !== null) {
+      if (!budget || !(await budget.reserve(stroops, net.dailyBudget))) {
+        console.error(`[relay] daily budget reached (${net.dailyBudget} stroops)`);
+        throw new Refused(503, "The relay has reached today's limit. Try again tomorrow.");
+      }
+    }
+  };
+}
+
+/** The addresses a call's auth entries sign as — on the func path, the wallets asking. */
+function signingAddresses(entries: xdr.SorobanAuthorizationEntry[]): string[] {
+  const out = new Set<string>();
+  for (const e of entries) {
+    const c = e.credentials();
+    const a = c.switch().name === "sorobanCredentialsAddress" ? c.address() : c.addressV2();
+    out.add(Address.fromScAddress(a.address()).toString());
+  }
+  return [...out];
 }
 
 const json = (body: unknown, status: number) =>
@@ -104,8 +205,9 @@ export function clientKey(req: Request): string {
   );
 }
 
-export async function handleRelay(req: Request, env: RelayEnv, limiter?: RateLimiter): Promise<Response> {
+export async function handleRelay(req: Request, env: RelayEnv, guards: RelayGuards = {}): Promise<Response> {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const { limiter, walletLimiter, budget } = guards;
 
   let net: RelayNetwork;
   try {
@@ -114,9 +216,12 @@ export async function handleRelay(req: Request, env: RelayEnv, limiter?: RateLim
     console.error("relay misconfigured:", e instanceof Error ? e.message : String(e));
     return json({ error: "Relay is not configured." }, 503);
   }
-  // Fails closed: a mainnet relay without a limiter would pay real fees for anyone, as fast
-  // as they can ask.
-  if (net.requiresLimiter && !limiter) return json({ error: "Relay is not configured." }, 503);
+  // Fails closed: a mainnet relay without its limiters and its daily total would pay real
+  // fees for anyone, as fast and as often as they can ask.
+  if (net.requiresLimiter && !(limiter && walletLimiter && budget)) {
+    return json({ error: "Relay is not configured." }, 503);
+  }
+  if (net.dailyBudget !== null && !budget) return json({ error: "Relay is not configured." }, 503);
   if (limiter && !(await limiter.limit({ key: clientKey(req) })).success) {
     return json({ error: "Too many requests — wait a minute and try again." }, 429);
   }
@@ -177,8 +282,6 @@ export async function handleRelay(req: Request, env: RelayEnv, limiter?: RateLim
   const gated = isFuncCall ? (func as string) : hostFunctionFromEnvelope(envelope as string);
   if (!gated || !(await admit(gated))) return json({ error: "Not allowed." }, 403);
 
-  const deps = { server: new rpc.Server(net.rpcUrl), keypair, networkPassphrase: net.passphrase };
-
   let entries: xdr.SorobanAuthorizationEntry[] = [];
   if (isFuncCall) {
     try {
@@ -187,7 +290,23 @@ export async function handleRelay(req: Request, env: RelayEnv, limiter?: RateLim
       return json({ error: "Malformed request." }, 400);
     }
     if (!authEntriesAreSafe(entries, keypair.publicKey())) return json({ error: "Not allowed." }, 403);
+    // A wallet asking from many addresses is still one wallet. The envelope path (creating a
+    // wallet) has no wallet yet to key on; the IP limiter and the daily total cover it.
+    if (walletLimiter) {
+      for (const wallet of signingAddresses(entries)) {
+        if (!(await walletLimiter.limit({ key: wallet })).success) {
+          return json({ error: "Too many requests — wait a minute and try again." }, 429);
+        }
+      }
+    }
   }
+
+  const server = new rpc.Server(net.rpcUrl);
+  const feeAccount = keypair.publicKey();
+  const charge = feeGate(net, budget, async () =>
+    BigInt((await server.getAccountEntry(feeAccount)).balance().toString()),
+  );
+  const deps = { server, keypair, networkPassphrase: net.passphrase, charge };
 
   try {
     const result = isFuncCall
@@ -195,6 +314,7 @@ export async function handleRelay(req: Request, env: RelayEnv, limiter?: RateLim
       : await submitEnvelope(deps, envelope as string);
     return json({ hash: result.hash, status: result.status }, 200);
   } catch (e) {
+    if (e instanceof Refused) return json({ error: e.message }, e.status);
     const msg = e instanceof Error ? e.message : String(e);
     console.error("relay failed:", msg);
     return json({ error: "Relay failed." }, 502);
