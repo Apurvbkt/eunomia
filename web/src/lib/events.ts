@@ -1,10 +1,7 @@
 // Real-time contract event synchronisation (Level 2). Soroban has no push stream, so
-// we cursor-poll the RPC's getEvents for the treasury + verifier and surface them as a
-// live activity feed.
+// we cursor-poll the RPC's getEvents for the contracts a view follows and surface them as
+// a live activity feed.
 import { rpc, scValToNative } from "@stellar/stellar-sdk";
-import { TREASURY_ID, VERIFIER_ID } from "../config";
-
-const WATCHED = [TREASURY_ID, VERIFIER_ID];
 
 export interface FeedEvent {
   id: string;
@@ -62,14 +59,15 @@ export function formatEvent(topics: unknown[], data: unknown): { kind: string; l
   }
 }
 
-/** One page of getEvents, decoded into feed items. Pass contractIds to watch a specific
- *  treasury (defaults to the demo treasury + verifier), plus either startLedger or a cursor. */
+/** One page of getEvents, decoded into feed items, for the contracts named — plus either
+ *  startLedger or a cursor. */
 export async function fetchEventsPage(
   server: rpc.Server,
-  opts?: { contractIds?: string[]; startLedger?: number; cursor?: string; limit?: number },
+  o: { contractIds: string[]; startLedger?: number; cursor?: string; limit?: number },
 ): Promise<{ events: FeedEvent[]; cursor: string; latestLedger: number }> {
-  const o = opts ?? {};
-  const filters = [{ type: "contract" as const, contractIds: o.contractIds ?? WATCHED }];
+  // An empty filter would not mean "nothing": it would ask for every contract's events.
+  if (o.contractIds.length === 0) throw new Error("fetchEventsPage: no contracts to watch.");
+  const filters = [{ type: "contract" as const, contractIds: o.contractIds }];
   const res = await server.getEvents(
     o.cursor
       ? { cursor: o.cursor, filters, limit: o.limit }

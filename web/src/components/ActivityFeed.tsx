@@ -4,7 +4,7 @@
 // logged, (3) the original Soroban RPC cursor-poll for richer on-chain event labels.
 import { useEffect, useMemo, useState } from "react";
 import { rpc } from "@stellar/stellar-sdk";
-import { EXPLORER, RPC_URL, TREASURY_ID, VERIFIER_ID, shortAddr } from "../config";
+import { DEMO_CONTRACTS, EXPLORER, RPC_URL, shortAddr } from "../config";
 import { dedupeById, fetchAllEvents, fetchEventsPage, type FeedEvent } from "../lib/events";
 import { fetchActivityHistory, mergeFeedEvents, subscribeActivity } from "../lib/activity";
 import { filterFeed, type FeedFilter } from "../lib/feedFilter";
@@ -35,13 +35,13 @@ export default function ActivityFeed({ filter }: { filter?: FeedFilter }) {
   const [state, setState] = useState<"connecting" | "live" | "error">("connecting");
   const [visible, setVisible] = useState(PAGE);
 
-  // Watch the connected user's own treasury alongside the demo treasury + verifier —
-  // otherwise a user's payments never show up here and the feed looks broken.
+  // Watch the connected user's own treasury alongside the demo treasury + verifier (testnet
+  // only) — otherwise a user's payments never show up here and the feed looks broken.
   const address = useWalletAddress();
   const myTreasury = address ? getTreasuryId(address) : null;
 
   const contractIds = useMemo(
-    () => (myTreasury ? [TREASURY_ID, VERIFIER_ID, myTreasury] : [TREASURY_ID, VERIFIER_ID]),
+    () => (myTreasury ? [...DEMO_CONTRACTS, myTreasury] : DEMO_CONTRACTS),
     [myTreasury],
   );
 
@@ -54,7 +54,7 @@ export default function ActivityFeed({ filter }: { filter?: FeedFilter }) {
     const tick = async () => {
       if (stopped) return;
       try {
-        const page = await fetchEventsPage(server, cursor ? { cursor, contractIds } : ({ contractIds } as never));
+        const page = await fetchEventsPage(server, cursor ? { cursor, contractIds } : { contractIds });
         if (page.events.length) {
           setEvents((prev) => mergeFeedEvents(dedupeById(page.events), prev, MAX_ITEMS));
         }
@@ -72,6 +72,11 @@ export default function ActivityFeed({ filter }: { filter?: FeedFilter }) {
       const history = await fetchActivityHistory(MAX_ITEMS);
       if (stopped) return;
       if (history.length) setEvents((prev) => mergeFeedEvents(prev, history, MAX_ITEMS));
+      // Nothing on chain to follow yet (mainnet, no treasury connected): the history is it.
+      if (contractIds.length === 0) {
+        setState("live");
+        return;
+      }
       try {
         const latest = await server.getLatestLedger();
         const start = Math.max(1, latest.sequence - 17280); // RPC layer: ~last day, for richer labels

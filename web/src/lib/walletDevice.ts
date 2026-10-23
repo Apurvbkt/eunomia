@@ -8,6 +8,7 @@ import { RABET_ID } from "@creit.tech/stellar-wallets-kit/modules/rabet";
 import { HANA_ID } from "@creit.tech/stellar-wallets-kit/modules/hana";
 import { WALLET_CONNECT_ID } from "@creit.tech/stellar-wallets-kit/modules/wallet-connect";
 import type { Device } from "./funnel";
+import { NETWORK_LABEL } from "../config";
 
 // Extension-only wallets: their install path is a desktop browser extension, so on a
 // phone they are dead ends. Albedo is deliberately NOT here — it is web-based
@@ -22,9 +23,9 @@ export const desktopOnlyWalletIds: ReadonlySet<string> = new Set([
 ]);
 
 // Shown when a phone opens the connect modal — WalletConnect pairs through the wallet
-// app, and Testnet has to be selected there or signing fails with a network mismatch.
-export const MOBILE_WALLET_HINT =
-  "Connect with your wallet app — make sure it's on Testnet";
+// app, and this build's network has to be selected there or signing fails with a network
+// mismatch.
+export const MOBILE_WALLET_HINT = `Connect with your wallet app — make sure it's on ${NETWORK_LABEL}`;
 
 export type WalletDeviceAvailability = "available" | "desktop-only";
 

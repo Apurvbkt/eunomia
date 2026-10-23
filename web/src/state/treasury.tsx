@@ -34,7 +34,15 @@ import {
   type Lifecycle,
   type EunomiaState,
 } from "../lib/userTreasury";
-import { ATTACKER, NETWORK_PASSPHRASE, RPC_URL, SERVICE, shortAddr } from "../config";
+import {
+  IS_TESTNET,
+  NETWORK_LABEL,
+  NETWORK_PASSPHRASE,
+  RPC_URL,
+  SAMPLE_STRANGER,
+  SAMPLE_VENDOR,
+  shortAddr,
+} from "../config";
 import {
   demoAmount,
   initialLoop,
@@ -171,7 +179,7 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
       // that could not even build its source account looked identical to a treasury that
       // genuinely is not on chain.
       console.error("[treasury] could not read", id, e);
-      toast("error", "Could not read this treasury — it may not exist on testnet.");
+      toast("error", `Could not read this treasury — it may not exist on ${NETWORK_LABEL.toLowerCase()}.`);
     } finally {
       if (!stale()) setLoading(false);
     }
@@ -537,6 +545,11 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
       if (externalKey && !isValidAgentKey(externalKey)) {
         return invalid("That is not a Stellar public key (G…, 56 characters) — copy it from `eunomia-mcp init`.");
       }
+      // The built-in agent keeps its secret in this browser and is funded by friendbot: a
+      // testnet convenience. On mainnet the agent always brings its own key.
+      if (!externalKey && !IS_TESTNET) {
+        return invalid("Paste your agent's public key — run `eunomia-mcp init` on the agent's machine to get one.");
+      }
       setBusy("session");
       toast(
         "info",
@@ -665,7 +678,8 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
   const runAutonomousTask = useCallback(
     async (to?: string): Promise<ActionOutcome> => {
       if (!address || !treasuryId || !sessionSecret) return fail("No active Leash key on this device.");
-      const dest = (to ?? "").trim() || SERVICE;
+      const dest = (to ?? "").trim() || SAMPLE_VENDOR;
+      if (!dest) return fail("Choose who the agent pays.");
       const unit = tokenCodeOf(state?.token);
       setBusy("task");
       toast("info", "Agent is paying autonomously — no wallet popup…");
@@ -732,7 +746,9 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
         //    device's: the local payee book can hold an address that was never whitelisted
         //    or was removed since, and opening with a refused payment proves nothing.
         push("pay", { status: "running" });
-        const payee = await firstApprovedPayee(treasuryId, [...loadPayeeBook(treasuryId), SERVICE]);
+        const candidates = loadPayeeBook(treasuryId);
+        if (SAMPLE_VENDOR) candidates.push(SAMPLE_VENDOR);
+        const payee = await firstApprovedPayee(treasuryId, candidates);
         if (!payee) {
           const msg = "Approve a payee first — the loop opens with a payment your rules allow.";
           push("pay", { status: "failed", detail: msg });
@@ -753,16 +769,19 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
           hash: paid.hash,
         });
 
-        // 2. Someone the owner never approved. Prefer the demo's known address so the
-        //    ledger reads the same every time; if it has since been whitelisted, a fresh
-        //    key is the one address that certainly isn't on the list.
+        // 2. Someone the owner never approved. On testnet, prefer the demo's known address so
+        //    the ledger reads the same every time; if it has since been whitelisted, or on
+        //    mainnet, a fresh key is the one address that certainly isn't on the list.
         push("refused", { status: "running" });
         //    An unreadable answer counts as approved here: isApprovedPayee's "not approved"
         //    default is the safe side for choosing whom to pay, the wrong side for this.
-        const attackerMayBeApproved = await readClient(treasuryId)
-          .is_payee({ payee: ATTACKER })
-          .then((r) => r.result, () => true);
-        const stranger = attackerMayBeApproved ? Keypair.random().publicKey() : ATTACKER;
+        const known = SAMPLE_STRANGER;
+        const knownMayBeApproved =
+          !known ||
+          (await readClient(treasuryId)
+            .is_payee({ payee: known })
+            .then((r) => r.result, () => true));
+        const stranger = knownMayBeApproved || !known ? Keypair.random().publicKey() : known;
         const taskId = BigInt(Date.now());
         const tried = await sessionPay(treasuryId, sessionSecret, taskId, stranger, amount);
         if (tried.ok) {

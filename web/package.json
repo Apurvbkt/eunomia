@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "npm run docs:build && tsc -b && npm run check:api-types && vite build && node scripts/headers.mjs && npm run check:no-secrets",
+    "build:mainnet": "npm run docs:build && tsc -b && npm run check:api-types && vite build --mode mainnet && node scripts/headers.mjs && npm run check:no-secrets",
     "check:no-secrets": "node scripts/check-no-secrets.mjs",
     "check:api-types": "tsc --noEmit --ignoreConfig --module nodenext --moduleResolution nodenext --target es2022 --skipLibCheck --types node api/relay.ts api/faucet.ts",
     "docs:dev": "vitepress dev docs-site",

@@ -1,10 +1,13 @@
 // Treasury settings: identity (full ID + registry status with catch-up registration), live
 // limit updates, and the owner exits (pause / withdraw — the paths that keep working even
 // while paused). The exits sit in a red-framed panel apart from day-to-day edits.
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { EXPLORER, fmtXlm, shortAddr } from "../config";
-import WithdrawTry from "../components/WithdrawTry";
 import { useTreasury } from "../state/useTreasury";
+
+// The TRY anchor is a testnet sandbox: a mainnet build does not ship its code at all.
+const WithdrawTry =
+  __EUNOMIA_NETWORK__ === "testnet" ? lazy(() => import("../components/WithdrawTry")) : null;
 
 export default function Settings() {
   const t = useTreasury();
@@ -252,8 +255,13 @@ export default function Settings() {
                 </div>
               )}
               {withdrawErr && <div className="err">{withdrawErr}</div>}
-              {/* The anchor leg in reverse — only a USDC treasury holds what the anchor takes. */}
-              {t.tokenCode === "USDC" && <WithdrawTry />}
+              {/* The anchor leg in reverse — only a USDC treasury holds what the anchor takes,
+                  and the anchor is a testnet sandbox. */}
+              {WithdrawTry && t.tokenCode === "USDC" && (
+                <Suspense fallback={null}>
+                  <WithdrawTry />
+                </Suspense>
+              )}
             </>
           )}
         </section>

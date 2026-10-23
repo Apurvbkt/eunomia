@@ -138,5 +138,7 @@ src/lib/                  userTreasury (deploy/fund/pay) · smartWalletTx (act a
                           relaySubmit (fee-sponsored submission) · passkey · walletKit/walletSigner
                           insights (chart series) · events/analytics · activity (Supabase)
 api/                      serverless: /api/relay (fee sponsorship) · /api/faucet (testnet dispenser)
-src/config.ts             testnet contract ids + demo config (build-time non-testnet guard)
+src/networks.ts           testnet + mainnet tables; the build picks one (build / build:mainnet)
+src/config.ts             the app's view of that network — public values only
+src/demo/                 the guided demo and its testnet-only agent key; absent from a mainnet build
 ```

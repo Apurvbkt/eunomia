@@ -5,7 +5,9 @@
 // balance. (Premium visual pass is a later phase with Gemini; this is the functional layer.)
 import { useCallback, useEffect, useState } from "react";
 import { Asset, BASE_FEE, Horizon, Operation, TransactionBuilder } from "@stellar/stellar-sdk";
-import { EXPLORER, HORIZON_URL, NETWORK_PASSPHRASE, shortAddr } from "../config";
+import { EXPLORER, HORIZON_URL, NETWORK_LABEL, NETWORK_PASSPHRASE, shortAddr } from "../config";
+
+const NET = NETWORK_LABEL.toLowerCase();
 import { connectErr, sendErr } from "../lib/wallet-errors";
 import { kit, connect as kitConnect, disconnect as kitDisconnect } from "../lib/walletKit";
 import { useWalletAddress } from "../lib/useWalletAddress";
@@ -119,10 +121,10 @@ export default function Wallet() {
         address,
       });
 
-      setStatus({ kind: "info", msg: "Submitting to testnet…" });
+      setStatus({ kind: "info", msg: `Submitting to ${NET}…` });
       const toSubmit = TransactionBuilder.fromXDR(signedTxXdr, NETWORK_PASSPHRASE);
       const res = await server.submitTransaction(toSubmit);
-      setStatus({ kind: "success", msg: "Payment sent — confirmed on testnet ✓", hash: res.hash });
+      setStatus({ kind: "success", msg: `Payment sent — confirmed on ${NET} ✓`, hash: res.hash });
       setAmount("");
       setDest("");
       await loadBalance(address);
@@ -143,7 +145,7 @@ export default function Wallet() {
           <span style={{ color: "var(--ink)" }}>◭</span> Wallet
         </h1>
         <p style={{ color: "var(--ink-2)", marginTop: 6, fontSize: 14 }}>
-          Connect any Stellar wallet, view your testnet XLM balance, and send a payment.
+          Connect any Stellar wallet, view your {NET} XLM balance, and send a payment.
         </p>
 
         {!address ? (
@@ -193,7 +195,7 @@ export default function Wallet() {
               </p>
             ) : (
               <div style={{ marginTop: 18 }}>
-                <div style={label}>Send XLM (testnet)</div>
+                <div style={label}>Send XLM ({NET})</div>
                 <input
                   style={input}
                   placeholder="Destination address (G…)"

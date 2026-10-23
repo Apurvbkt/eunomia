@@ -1,4 +1,4 @@
-import { EXPLORER, TREASURY_ID, VERIFIER_ID, REGISTRY_ID } from "../../config";
+import { EXPLORER, LISTED_CONTRACTS, NETWORK_LABEL } from "../../config";
 import { TRACTION } from "./traction";
 import EunomiaMark from "../EunomiaMark";
 
@@ -10,11 +10,7 @@ const REPO = "https://github.com/eunomia-finance/eunomia";
  *  product that says "don't trust us, check the chain" has to say where to check. The contract
  *  addresses, the security policy and the people behind it are that. Technical vocabulary
  *  still stays out — an address is a destination, not jargon. */
-const ON_CHAIN = [
-  { label: "Treasury contract", id: TREASURY_ID },
-  { label: "Proof verifier", id: VERIFIER_ID },
-  { label: "Treasury registry", id: REGISTRY_ID },
-];
+const ON_CHAIN = LISTED_CONTRACTS;
 
 export default function Footer() {
   return (
@@ -93,7 +89,7 @@ export default function Footer() {
         </div>
 
         <div className="lp__footer-row" style={{ marginTop: 30 }}>
-          <span className="lp__badge">Stellar Testnet</span>
+          <span className="lp__badge">Stellar {NETWORK_LABEL}</span>
           <span>Open source, every line readable — MIT.</span>
           <span>
             {TRACTION.treasuries} treasuries · {TRACTION.blocked} out-of-policy attempts stopped

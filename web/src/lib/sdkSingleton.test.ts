@@ -14,7 +14,8 @@ import config from "../../vite.config";
 // lives in the bundler, and this is what notices if it is removed.
 describe("stellar-sdk bundling", () => {
   it("dedupes the SDK, because the tree really does carry more than one copy", () => {
-    expect(config.resolve?.dedupe).toContain("@stellar/stellar-sdk");
+    const resolved = config({ mode: "test", command: "build" });
+    expect(resolved.resolve?.dedupe).toContain("@stellar/stellar-sdk");
 
     const root = process.cwd();
     const ours = createRequire(join(root, "package.json")).resolve("@stellar/stellar-sdk");

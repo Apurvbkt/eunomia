@@ -1,12 +1,13 @@
-import { EXPLORER } from "../../config";
 import { TRACTION } from "./traction";
 
 /** A real refusal, shown before anything is explained.
  *
  *  This is the product's strongest moment and the one competitors cannot show: a per-payment
  *  cap alone can be drained by repeated payments, so "it was refused" only means something
- *  when the caps are cumulative. The tx hash makes it checkable rather than claimed. */
+ *  when the caps are cumulative. The tx hash makes it checkable rather than claimed. It ran
+ *  on testnet, so it links there whichever network this build serves. */
 const BLOCKED_TX = "32f3b29f4b2c4a3f9c5e0d1a7b8c6e5f4d3c2b1a0f9e8d7c6b5a4938271605f4e";
+const TESTNET_EXPLORER = "https://stellar.expert/explorer/testnet";
 
 export default function Proof() {
   return (
@@ -79,7 +80,7 @@ export default function Proof() {
         <p className="lp__k lp__reveal" style={{ marginTop: 26 }}>
           <a
             className="lp__link"
-            href={`${EXPLORER}/tx/${BLOCKED_TX}`}
+            href={`${TESTNET_EXPLORER}/tx/${BLOCKED_TX}`}
             target="_blank"
             rel="noreferrer"
           >

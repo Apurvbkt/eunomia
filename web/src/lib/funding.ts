@@ -2,7 +2,7 @@
 // action (deploying a treasury) fails with an opaque error. Check the wallet's native
 // balance via Horizon and offer friendbot funding when it's empty. Pure functions with
 // an injectable fetch, so they're unit-testable.
-import { HORIZON_URL } from "../config";
+import { HORIZON_URL, IS_TESTNET, NETWORK_PASSPHRASE, RPC_URL, SIMULATION_SOURCE, XLM_SAC } from "../config";
 
 const FRIENDBOT_URL = "https://friendbot.stellar.org";
 
@@ -32,11 +32,9 @@ export async function getXlmBalance(
 export async function getContractXlmBalance(address: string): Promise<number | null> {
   const { Account, BASE_FEE, Contract, TransactionBuilder, rpc, scValToNative, Address } =
     await import("@stellar/stellar-sdk");
-  const { NETWORK_PASSPHRASE, RPC_URL, ADMIN } = await import("../config");
-  const XLM_SAC = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 
   try {
-    const tx = new TransactionBuilder(new Account(ADMIN, "0"), {
+    const tx = new TransactionBuilder(new Account(SIMULATION_SOURCE, "0"), {
       fee: BASE_FEE,
       networkPassphrase: NETWORK_PASSPHRASE,
     })
@@ -61,6 +59,7 @@ export async function fundWithFriendbot(
   address: string,
   fetchFn: typeof fetch = fetch,
 ): Promise<void> {
+  if (!IS_TESTNET) throw new Error("Free XLM exists only on testnet.");
   if (isContractAddress(address)) return dispenseToWallet(address, fetchFn);
 
   const res = await fetchFn(`${FRIENDBOT_URL}/?addr=${encodeURIComponent(address)}`);

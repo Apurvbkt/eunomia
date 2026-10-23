@@ -18,7 +18,7 @@ import {
   type TWalletConnectModuleParams as WalletConnectModuleParams,
 } from "@creit.tech/stellar-wallets-kit/modules/wallet-connect";
 import { rpc } from "@stellar/stellar-sdk";
-import { ADMIN, NETWORK_PASSPHRASE, RPC_URL } from "../config";
+import { IS_TESTNET, NETWORK_PASSPHRASE, RPC_URL, SIMULATION_SOURCE, XLM_SAC } from "../config";
 import { makeWalletSigner, type ContractSigner } from "./walletSigner";
 import { currentDevice, logFunnel } from "./funnel";
 import { errText } from "./wallet-errors";
@@ -53,7 +53,6 @@ import {
   recoverWallet,
   type RecoveryDeps,
 } from "./recoveryFlow";
-import { XLM_SAC } from "./userTreasury";
 
 // The extension modules only work on desktop. Freighter (and Lobstr) on a phone connect
 // over WalletConnect v2 — so without this module a mobile visitor with the wallet installed
@@ -105,7 +104,7 @@ if (WC_PROJECT_ID) {
         url: "https://eunomia.finance",
         icons: ["https://eunomia.finance/apple-touch-icon.png"],
       },
-      allowedChains: [WalletConnectTargetChain.TESTNET],
+      allowedChains: [IS_TESTNET ? WalletConnectTargetChain.TESTNET : WalletConnectTargetChain.PUBLIC],
       appKitOptions: {
         includeWalletIds: STELLAR_WC_WALLETS,
       } as WalletConnectModuleParams["appKitOptions"],
@@ -123,7 +122,7 @@ const defaultWalletId = modules.some((m) => m.productId === FREIGHTER_ID)
     : ALBEDO_ID;
 
 StellarWalletsKit.init({
-  network: Networks.TESTNET,
+  network: IS_TESTNET ? Networks.TESTNET : Networks.PUBLIC,
   selectedWalletId: defaultWalletId,
   modules,
 });
@@ -417,7 +416,7 @@ export async function executorFor(address: string): Promise<TxExecutor> {
     const asWallet: SmartWalletDeps = {
       server: new rpc.Server(RPC_URL),
       networkPassphrase: NETWORK_PASSPHRASE,
-      simulationSource: ADMIN,
+      simulationSource: SIMULATION_SOURCE,
       signAuthEntry: (entry) => wallet.signAuthEntry(entry),
       relay: (func, auth) => relayHostFunction(fetch as unknown as FetchLike, func, auth, onLedger()),
     };

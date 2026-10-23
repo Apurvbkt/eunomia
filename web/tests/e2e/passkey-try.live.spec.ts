@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test, expect, type CDPSession, type Page } from "@playwright/test";
 import { Client as TreasuryClient } from "../../src/lib/treasuryClient";
-import { ANCHOR_USDC } from "../../src/lib/token";
+import { USDC_TOKEN } from "../../src/lib/token";
 import { NETWORK_PASSPHRASE, RPC_URL } from "../../src/config";
 
 const EXCLUDE = fileURLToPath(new URL("../../../docs/metrics/e2e-exclude.json", import.meta.url));
@@ -110,7 +110,7 @@ test("a passkey owner creates a USDC treasury and funds it with TRY, holding no 
   const treasury = new TreasuryClient({ contractId: created!.treasury!, networkPassphrase: NETWORK_PASSPHRASE, rpcUrl: RPC_URL });
   const cfg = (await treasury.get_config()).result;
   expect(cfg.admin).toBe(created!.wallet);
-  expect(cfg.token).toBe(ANCHOR_USDC);
+  expect(cfg.token).toBe(USDC_TOKEN);
   expect((await treasury.balance()).result).toBeGreaterThan(30_000_000n);
 
   // And back out to a bank — the one step of the ramp that does need the owner: exactly one

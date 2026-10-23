@@ -1,21 +1,22 @@
 // A treasury holds exactly one token, fixed when it is created. Two are offered: XLM, funded
-// from the owner's wallet, and the anchor's USDC, funded with TRY through the anchor. Both
-// are 7-decimal, so every amount in the app is the same arithmetic under a different label.
-import { XLM_SAC } from "./userTreasury";
+// from the owner's wallet, and USDC — on testnet the TRY anchor's, funded with TRY through
+// the anchor; on mainnet Circle's. Both are 7-decimal, so every amount in the app is the same
+// arithmetic under a different label.
+import { USDC_ISSUER, USDC_TOKEN, XLM_SAC } from "../config";
 
-/** The Stellar Asset Contract of USDC:GBBD47IF…FLA5 on testnet — the asset the TRY anchor
- *  pays out. Derivable from the issuer (token.test.ts pins it to that derivation); written
- *  out so a label never has to wait for the anchor's stellar.toml. */
-export const ANCHOR_USDC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+/** The USDC Stellar Asset Contract of this build's network. Derivable from the issuer
+ *  (token.test.ts pins it to that derivation); written out so a label never has to wait
+ *  for an issuer's stellar.toml. */
+export { USDC_TOKEN };
 
-/** The classic issuer behind ANCHOR_USDC — a G… payee must trust it to receive USDC. */
-export const ANCHOR_USDC_ISSUER = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+/** The classic issuer behind USDC_TOKEN — a G… payee must trust it to receive USDC. */
+export { USDC_ISSUER };
 
 export type TokenCode = "XLM" | "USDC";
 
-export const tokenIdOf = (code: TokenCode): string => (code === "USDC" ? ANCHOR_USDC : XLM_SAC);
+export const tokenIdOf = (code: TokenCode): string => (code === "USDC" ? USDC_TOKEN : XLM_SAC);
 
 /** The label for a treasury's token. Anything unrecognised reads as XLM, which is what every
  *  treasury was before the choice existed. */
 export const tokenCodeOf = (tokenId: string | null | undefined): TokenCode =>
-  tokenId === ANCHOR_USDC ? "USDC" : "XLM";
+  tokenId === USDC_TOKEN ? "USDC" : "XLM";

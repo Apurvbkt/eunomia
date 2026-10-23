@@ -5,9 +5,8 @@
 import { Address, Contract, StrKey, hash, xdr } from "@stellar/stellar-sdk";
 import { Client as FactoryClient, type Setup } from "./factoryClient";
 import type { TxExecutor } from "./executor";
-import { TREASURY_FACTORY_ID } from "./treasuryWasm";
 import { XLM_SAC, toStroops } from "./userTreasury";
-import { NETWORK_PASSPHRASE, RPC_URL } from "../config";
+import { FACTORY_ID, NETWORK_PASSPHRASE, RPC_URL } from "../config";
 
 export interface TreasurySetup {
   /** The token the treasury holds and spends. XLM when left out; the anchor's USDC for a
@@ -42,7 +41,7 @@ export const freshSalt = (): Buffer => Buffer.from(crypto.getRandomValues(new Ui
  *  The factory deploys with `deployer().with_current_contract(salt)`, so the address is the
  *  hash of (network, factory, salt) and nothing else — not the owner, not the limits. That is
  *  the protocol's contract-id preimage, computed here without a network call. */
-export function predictTreasuryId(salt: Buffer, factoryId = TREASURY_FACTORY_ID, passphrase = NETWORK_PASSPHRASE): string {
+export function predictTreasuryId(salt: Buffer, factoryId = FACTORY_ID, passphrase = NETWORK_PASSPHRASE): string {
   const preimage = xdr.HashIdPreimage.envelopeTypeContractId(
     new xdr.HashIdPreimageContractId({
       networkId: hash(Buffer.from(passphrase)),
@@ -80,7 +79,7 @@ export function factorySetupArgs(owner: string, s: TreasurySetup, nowSec: number
 }
 
 const readOnlyFactory = () =>
-  new FactoryClient({ contractId: TREASURY_FACTORY_ID, networkPassphrase: NETWORK_PASSPHRASE, rpcUrl: RPC_URL });
+  new FactoryClient({ contractId: FACTORY_ID, networkPassphrase: NETWORK_PASSPHRASE, rpcUrl: RPC_URL });
 
 /** Create and set up a treasury with ONE owner signature. Returns the treasury id.
  *
@@ -91,11 +90,11 @@ export async function createTreasury(executor: TxExecutor, s: TreasurySetup): Pr
   const setup = factorySetupArgs(executor.address, s, Math.floor(Date.now() / 1000), s.salt ?? freshSalt());
   if (executor.invoke) {
     const args = readOnlyFactory().spec.funcArgsToScVals("create", { s: setup });
-    const retval = await executor.invoke(new Contract(TREASURY_FACTORY_ID).call("create", ...args));
+    const retval = await executor.invoke(new Contract(FACTORY_ID).call("create", ...args));
     return Address.fromScVal(retval).toString();
   }
   const tx = await new FactoryClient({
-    contractId: TREASURY_FACTORY_ID,
+    contractId: FACTORY_ID,
     networkPassphrase: NETWORK_PASSPHRASE,
     rpcUrl: RPC_URL,
     publicKey: executor.address,

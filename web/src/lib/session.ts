@@ -6,11 +6,11 @@
 //
 // ⚠️ The session SECRET lives in localStorage — acceptable on TESTNET precisely
 // because the design's point is a bounded credential: cap + expiry + instant
-// revoke make a leak survivable. Mainnet needs fee sponsorship + hardened key
-// storage (roadmap M3); the demo key's non-testnet build guard applies there too.
+// revoke make a leak survivable. A mainnet build never creates one: there the agent
+// holds its own key (eunomia-mcp) and only its public half is registered.
 import { BASE_FEE, Keypair, Operation, StrKey, TransactionBuilder, rpc } from "@stellar/stellar-sdk";
 import { basicNodeSigner } from "@stellar/stellar-sdk/contract";
-import { NETWORK_PASSPHRASE, RPC_URL } from "../config";
+import { IS_TESTNET, NETWORK_PASSPHRASE, RPC_URL } from "../config";
 import {
   encodeExceptionPayload,
   exceptionEntryName,
@@ -80,6 +80,11 @@ export async function createSession(
   durationHours: number,
   onPhase?: (phase: "registering" | "funding") => void,
 ): Promise<PayResult & { sessionPk?: string; registered?: boolean }> {
+  // Checked before anything is signed: on mainnet there is no friendbot to fund the key, and
+  // a key kept in localStorage would be holding real money.
+  if (!IS_TESTNET) {
+    return { ok: false, errorMessage: "On mainnet the agent brings its own key — connect it with eunomia-mcp." };
+  }
   const kp = Keypair.random();
   const validUntil = BigInt(Math.floor(Date.now() / 1000) + Math.round(durationHours * 3600));
   onPhase?.("registering");

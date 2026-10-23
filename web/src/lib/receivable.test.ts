@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { payeeLacksTrustline } from "./receivable";
-import { ANCHOR_USDC_ISSUER } from "./token";
+import { USDC_ISSUER } from "./token";
 
 const PAYEE = "GB4GJNEZ6KLZNU3TE2CHQFNPOEQL5SHPQ246OMRZRLKVVQNLZCDX2QXZ";
-const usdcLine = { asset_type: "credit_alphanum4", asset_code: "USDC", asset_issuer: ANCHOR_USDC_ISSUER };
+const usdcLine = { asset_type: "credit_alphanum4", asset_code: "USDC", asset_issuer: USDC_ISSUER };
 
 describe("payeeLacksTrustline", () => {
   it("flags a G… account that holds no USDC trustline", async () => {
@@ -32,7 +32,7 @@ describe("payeeLacksTrustline", () => {
     };
     expect(await payeeLacksTrustline(PAYEE, "XLM", boom)).toBe(false);
     expect(await payeeLacksTrustline("CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "USDC", boom)).toBe(false);
-    expect(await payeeLacksTrustline(ANCHOR_USDC_ISSUER, "USDC", boom)).toBe(false);
+    expect(await payeeLacksTrustline(USDC_ISSUER, "USDC", boom)).toBe(false);
     expect(await payeeLacksTrustline(PAYEE, "USDC", boom)).toBe(false);
   });
 });

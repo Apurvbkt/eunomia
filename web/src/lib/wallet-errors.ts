@@ -1,6 +1,7 @@
 // Wallet error classification — pure functions, so they're unit-testable. Map raw
 // wallet/SDK errors into the three surfaced error types: wallet not installed,
 // request rejected, and insufficient balance.
+import { IS_TESTNET } from "../config";
 
 export function errText(e: unknown): string {
   if (e && typeof e === "object" && "message" in e) return String((e as { message: unknown }).message);
@@ -52,7 +53,9 @@ export function sendErr(e: unknown): string {
   }
   const m = errText(e).toLowerCase();
   if (m.includes("account not found") || m.includes("account does not exist")) {
-    return "Your wallet has no XLM on testnet yet — use the funding box above to get free testnet XLM first.";
+    return IS_TESTNET
+      ? "Your wallet has no XLM on testnet yet — use the funding box above to get free testnet XLM first."
+      : "Your wallet has no XLM on mainnet yet — send some XLM to it first.";
   }
   if (m.includes("underfunded") || m.includes("insufficient balance")) {
     return "Insufficient balance for this payment.";

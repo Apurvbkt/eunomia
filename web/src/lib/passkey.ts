@@ -12,6 +12,9 @@
 
 import { assertAssembledAuth } from "./authCheck";
 import { walletOnlyLimits } from "./recovery";
+// Static, never `await import()`: a dynamic import turns the module into a namespace object
+// the bundler must keep whole, testnet-only constants included.
+import { NETWORK_PASSPHRASE, RP_ID, RPC_URL, WALLET_WASM_HASH } from "../config";
 
 export interface PasskeyIdentity {
   contractId: string;
@@ -127,7 +130,6 @@ export function resetPasskeyBackend(): void {
 
 async function buildPasskeyBackend(): Promise<PasskeyBackend> {
   const { PasskeyKit } = await import("passkey-kit");
-  const { RPC_URL, NETWORK_PASSPHRASE, WALLET_WASM_HASH, RP_ID } = await import("../config");
 
   const kit = new PasskeyKit({
     rpcUrl: RPC_URL,

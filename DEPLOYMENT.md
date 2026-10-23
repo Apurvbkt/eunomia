@@ -399,6 +399,19 @@ The app creates through the v4 factory; the relay keeps admitting the v3.5 facto
   `connect-src` limited to Stellar, Supabase, WalletConnect, the anchor and the analytics
   beacon, `frame-ancestors 'none'`. Probed with Chromium across the landing, app pages,
   wallet modal and docs: no violations.
+- **Mainnet web build (2026-10-23, review M5).** The network is chosen by the build, not by
+  editing a file: `npm run build` is testnet, `npm run build:mainnet` (`vite build --mode
+  mainnet`) is pubnet. `web/src/networks.ts` holds both tables; the mainnet one leaves the RPC,
+  factory, registry and deposit cap empty, and the build refuses to start until each is set
+  there or as `EUNOMIA_RPC_URL` (a trusted provider, never a public default: its simulation
+  decides what a passkey signs over), `EUNOMIA_FACTORY_ID`, `EUNOMIA_REGISTRY_ID`,
+  `EUNOMIA_DEPOSIT_CAP` (whole token units). The guided demo and its embedded agent key live
+  in `web/src/demo/` and are reachable only behind the build's network constant, so a mainnet
+  bundle has no demo chunk at all; the TRY anchor sandbox, friendbot, the in-browser Leash key
+  and the sample vendor are testnet-only too. `check:no-secrets` reads the network from
+  `dist/build-info.json` (written by the build) and fails a mainnet bundle that holds any secret
+  seed, the demo's addresses or a testnet RPC/Horizon host; CI builds a mainnet bundle with
+  stand-in ids on every push. The CSP adds the pinned RPC's origin and drops the anchor.
 
 | Item | Value |
 |---|---|

@@ -14,11 +14,11 @@ import {
 import { Client, type Session } from "./treasuryClient";
 import { contractErr, errText } from "./wallet-errors";
 import type { SubmittableTx, TxExecutor } from "./executor";
-import { DEPOSIT_CAP_STROOPS, TREASURY_WASM_HASH } from "./treasuryWasm";
-import { NETWORK_PASSPHRASE, RPC_URL } from "../config";
+import { TREASURY_WASM_HASH } from "./treasuryWasm";
+import { DEPOSIT_CAP_STROOPS, NETWORK_PASSPHRASE, RPC_URL, XLM_SAC } from "../config";
 
-// Native XLM SAC on testnet — the token each user treasury holds and spends.
-export const XLM_SAC = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
+// The native XLM SAC — the token an XLM treasury holds and spends.
+export { XLM_SAC };
 // Treasury WASM already installed on-chain — deploy just instantiates a new contract from it.
 // Defined in its own module so the relay, which decides whether to sponsor the deploy, reads
 // the very same value; see the drift note in relayGuard.allowedWasmHashes.

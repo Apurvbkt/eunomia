@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   pay: vi.fn(),
 }));
 
-vi.mock("./treasuryClient", () => ({
+vi.mock("../lib/treasuryClient", () => ({
   // A real class so `new Client(...)` works — arrow-fn mocks aren't constructable.
   Client: class {
     pay = mocks.pay;

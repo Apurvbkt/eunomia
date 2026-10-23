@@ -9,12 +9,13 @@ import { motion, AnimatePresence, animate, useMotionValue, useMotionValueEvent }
 import FundingRail from "./FundingRail";
 import {
   readState, readTaskSpent, agentPay, type EunomiaState, type PayResult,
-} from "../lib/eunomia";
+} from "./eunomia";
+import { fmtUSDC, shortAddr, txUrl, contractUrl } from "../config";
 import {
-  TASKS, ROGUE, fmtUSDC, shortAddr, txUrl, contractUrl,
+  TASKS, ROGUE,
   TREASURY_ID, USDC_SAC, AGENT_PK, REG_IDENTITY, AGENT_8004_ID,
   SERVICE, ATTACKER, VERIFIER_ID, ATTESTED_TX, type AgentTask,
-} from "../config";
+} from "./config";
 
 const EASE = [0.2, 0.7, 0.3, 1] as const;
 const up = (delay: number) => ({

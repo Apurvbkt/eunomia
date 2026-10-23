@@ -13,7 +13,8 @@ import {
   Operation,
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
-import { AGENT_SECRET, HORIZON_URL, NETWORK_PASSPHRASE, POOL_PK } from "../config";
+import { HORIZON_URL, NETWORK_PASSPHRASE } from "../config";
+import { AGENT_SECRET, POOL_PK } from "./config";
 
 const server = new Horizon.Server(HORIZON_URL);
 const funder = Keypair.fromSecret(AGENT_SECRET); // a "client" wallet, for the demo

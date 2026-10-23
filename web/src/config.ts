@@ -1,63 +1,80 @@
-// Eunomia — testnet configuration. All values are public testnet artifacts.
-// The agent secret is a TESTNET-only key with no real value; embedding it lets the
-// dashboard demonstrate an *autonomous* agent that signs its own payments (no wallet
-// popup) — the whole point is that the contract, not a human click, is the safety.
+// Eunomia — app configuration. Holds no secrets: everything here is public and every
+// network-dependent value comes from the network the build was made for (see networks.ts).
+// The guided demo's agent key lives in demo/config.ts, which only a testnet build includes.
+import { TESTNET, type NetworkConfig } from "./networks";
 
-export const NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
-export const RPC_URL = "https://soroban-testnet.stellar.org";
-export const HORIZON_URL = "https://horizon-testnet.stellar.org";
-export const EXPLORER = "https://stellar.expert/explorer/testnet";
+// Injected by vite.config.ts (build-env.d.ts). Absent when this module is loaded outside Vite
+// (Playwright config and specs), which only ever run against testnet.
+const NET: NetworkConfig = typeof __EUNOMIA_NET__ === "undefined" ? TESTNET : __EUNOMIA_NET__;
 
-export const TREASURY_ID = "CAYWNXHANRY5GSJAZOR4YTKBKNOKTCITE52ZRKDKCAWLDTYWFFVFSPAZ";
+/** Folds to a constant inside this module, so the testnet-only values below drop out of a
+ *  mainnet bundle. The bundler does not carry that folding into other modules: anything
+ *  there that must vanish from a mainnet build (a lazy chunk, a literal) is decided here, or
+ *  tested against `__EUNOMIA_NETWORK__` directly, never against this. */
+export const IS_TESTNET: boolean =
+  (typeof __EUNOMIA_NETWORK__ === "undefined" ? "testnet" : __EUNOMIA_NETWORK__) === "testnet";
+
+export const NETWORK_LABEL = NET.label;
+export const NETWORK_PASSPHRASE = NET.passphrase;
+export const RPC_URL = NET.rpcUrl;
+export const HORIZON_URL = NET.horizonUrl;
+export const EXPLORER = NET.explorer;
+
+/** The native XLM SAC — the token an XLM treasury holds and spends. */
+export const XLM_SAC = NET.xlmSac;
+/** The USDC SAC a USDC treasury holds, and its classic issuer. */
+export const USDC_TOKEN = NET.usdcSac;
+export const USDC_ISSUER = NET.usdcIssuer;
+
+/** The treasury factory: one owner signature deploys a treasury with its policy, payees,
+ *  Leash, funding and registry entry. */
+export const FACTORY_ID = NET.factoryId;
+/** The deposit cap the factory above pins on every treasury. Mirrored only so the app can
+ *  say so before the owner signs; the contract is what enforces it. */
+export const DEPOSIT_CAP_STROOPS = BigInt(NET.depositCap);
+
+// Eunomia Treasury Registry — permissionless wallet → treasury discovery index,
+// used for cross-device recovery of per-user treasuries.
+export const REGISTRY_ID = NET.registryId;
+
+/** Source account for read-only simulations. Nothing is ever signed or sent from it. */
+export const SIMULATION_SOURCE = NET.simulationSource;
+
+// --- Testnet fixtures ---------------------------------------------------------------
+// Public addresses the guided demo and the testnet onboarding run on. Addresses only.
+export const DEMO_TREASURY_ID = "CAYWNXHANRY5GSJAZOR4YTKBKNOKTCITE52ZRKDKCAWLDTYWFFVFSPAZ";
 // ZK compliance verifier. Multi-tenant: it holds no policy of its own and re-reads every
 // claim — limits, payee root, and the period's actual total — from the treasury named in
 // the call, which is what makes an attestation mean something. Emits `attested`.
 // 2026-08-07: rebuilt for the 16-slot batch (21 public signals). Proofs are not portable
 // across this change — the previous verifier CCZKA3K4… expects 13 and rejects them.
-export const VERIFIER_ID = "CD3TB3F4VQF2H56IQC4KV3YLA6QRIF272W5D6PK2SWVTYPXHS4NFDYZ3";
-// Live on-chain compliance attestation — the verify() tx that emitted `attested`.
-// Periods only move forward, so this one cannot be re-run; it is shown, not repeated.
-export const ATTESTED_TX = "426e55d6ce0a9157c156190cee39dc2a1d302cf4c7f4f98cc930da5ad63b4606";
-export const USDC_SAC = "CDCEHPK4OJXVRA4JV7N56GR5SRD5KGGZ55BDSHKODGR72Y4KGS6A3Y2W";
+export const DEMO_VERIFIER_ID = "CD3TB3F4VQF2H56IQC4KV3YLA6QRIF272W5D6PK2SWVTYPXHS4NFDYZ3";
+export const DEMO_VENDOR = "GDOMW4C36BUBBFJW3V4L22LUICOUKFVTPGOYU6UMZZ6D3ENEOCH4QCRT";
+export const DEMO_STRANGER = "GAKSMBN6TRMF4M4PL3FJSDMQRD6XBQCJFLECLYTNAXZYMRIWXT6ADYTC";
 
-export const ADMIN = "GDPKXL6CNHUXBV4PM54CPTRZNQRYVTIMO4YGBW3M2MNSCMQ7TTNINXP6";
-export const AGENT_PK = "GDAOXABLEOFZP2M4PRM7N6YKOKXWMPFOSLU35WL5ZQY4PQFHF3VCIDS6";
-export const AGENT_SECRET = "SC6F5K7IPNX6MMN2JAV766FU7WKWYQ3M34W3MOLCPXTU55HSKS2BT2XV";
-
-// ⚠️ SAFETY GUARD — the embedded AGENT_SECRET is a throwaway TESTNET key. A real signing
-// key must NEVER live in frontend code: it ships verbatim inside the JS bundle. If this
-// build is ever pointed at a non-testnet network, refuse to load — move signing to a
-// backend proxy or a wallet (e.g. Freighter) first.
-// Deliberately unconditional — NOT gated on import.meta.env.PROD. Pointing a local
-// dev build at mainnet with this key embedded is just as dangerous as shipping it,
-// so the guard has to fire there too.
-//
-// Its real weakness is different: both sides of the comparison are literals in this
-// one file, so the only thing that trips it is a human editing the line above, and
-// the same human under cutover pressure can delete these six lines to unblock a
-// build. The independent control is `npm run check:no-secrets`, which greps the
-// built bundle for this key and fails the build — it runs on every `npm run build`
-// and does not live in the file being edited.
-const TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
-if (NETWORK_PASSPHRASE !== TESTNET_PASSPHRASE) {
-  throw new Error(
-    "Eunomia: the embedded AGENT_SECRET is testnet-only. On a non-testnet network, signing " +
-      "MUST move to a backend proxy or wallet (e.g. Freighter). Refusing to load a bundled secret.",
-  );
-}
-
-export const SERVICE = "GDOMW4C36BUBBFJW3V4L22LUICOUKFVTPGOYU6UMZZ6D3ENEOCH4QCRT";
-export const ATTACKER = "GAKSMBN6TRMF4M4PL3FJSDMQRD6XBQCJFLECLYTNAXZYMRIWXT6ADYTC";
-// Funding pool — one classic G-account whose zero-cost muxed sub-addresses
-// attribute incoming deposits to individual agent budgets (no memos, no new accounts).
-export const POOL_PK = "GD2NZKSMQW367OIFXRM4NP7RIW6YLDZLJ4C7253MDOKCFC4Q4IOO3427";
-
-// Eunomia Treasury Registry — permissionless wallet → treasury discovery index,
-// used for cross-device recovery of per-user treasuries (M2).
-export const REGISTRY_ID = "CBEPVXK6BN2FZ3IYHV5KQUGROFHNBWBYHKHRZ5U3O7UWGIOPFOFE4ZE7";
+/** A payee a new owner can try a payment against. Testnet only: on mainnet a "sample
+ *  vendor" would be someone's real address receiving real money. */
+export const SAMPLE_VENDOR: string | null = IS_TESTNET ? DEMO_VENDOR : null;
+/** An address the agent loop tries to pay so the contract can refuse it. On mainnet the loop
+ *  uses a fresh key instead, which is certainly on no one's payee list. */
+export const SAMPLE_STRANGER: string | null = IS_TESTNET ? DEMO_STRANGER : null;
+/** Contracts the public activity feed follows besides the user's own treasury. */
+export const DEMO_CONTRACTS: string[] = IS_TESTNET ? [DEMO_TREASURY_ID, DEMO_VERIFIER_ID] : [];
+/** The contracts the landing footer lists for anyone who wants to check the chain. */
+export const LISTED_CONTRACTS: { label: string; id: string }[] = IS_TESTNET
+  ? [
+      { label: "Treasury contract", id: DEMO_TREASURY_ID },
+      { label: "Proof verifier", id: DEMO_VERIFIER_ID },
+      { label: "Treasury registry", id: NET.registryId },
+    ]
+  : [
+      { label: "Treasury factory", id: NET.factoryId },
+      { label: "Treasury registry", id: NET.registryId },
+    ];
 
 // --- Passkey (smart wallet) --------------------------------------------------------
-// The smart-wallet WASM passkey-kit deploys for each new passkey user.
+// The smart-wallet WASM passkey-kit deploys for each new passkey user. The same code is
+// installed on testnet and mainnet.
 export const WALLET_WASM_HASH =
   "fdefad64b96837147e1c333e51f537b696eab925e9f147e63d597c04e3c903f0";
 // WebAuthn Relying Party id. A passkey is bound to this domain: change it and every passkey
@@ -68,49 +85,7 @@ export const WALLET_WASM_HASH =
 const IS_PROD = (import.meta as { env?: { PROD?: boolean } }).env?.PROD === true;
 export const RP_ID: string | undefined = IS_PROD ? "eunomia.finance" : undefined;
 
-// 8004 (trionlabs/stellar-8004) testnet registries — the agent trust layer.
-export const REG_IDENTITY = "CDE3K4COIAGWNNJQQLL26SYI3KBJF5FUDHXG5FA6GYDJCG7T5V7FIWZH";
-export const REG_REPUTATION = "CBZEAGIEI3HXMDRLF44KLQJQQOH6LCYWWSGJVSYQYQO2HQ6DDGZ7HT55";
-export const AGENT_8004_ID = 1; // the agent is registered as #1 on testnet
-
 export const USDC_UNIT = 10_000_000n; // 1 USDC (7 decimals)
-
-export interface AgentTask {
-  taskId: bigint;
-  name: string;
-  vendor: string;
-  payee: string;
-  amount: bigint;
-}
-
-// The legitimate jobs the autonomous agent runs (all within policy limits) — the
-// real things an AI agent pays for: inference, data, and compute (pay-per-use).
-export const TASKS: AgentTask[] = [
-  { taskId: 101n, name: "LLM inference · 4.2M tokens", vendor: "Inference API", payee: SERVICE, amount: 3n * USDC_UNIT },
-  { taskId: 102n, name: "Real-time market data", vendor: "Data feed", payee: SERVICE, amount: 2n * USDC_UNIT },
-  { taskId: 103n, name: "GPU compute · 2.5 hrs", vendor: "Compute cloud", payee: SERVICE, amount: 4n * USDC_UNIT },
-];
-
-// The prompt-injection / rogue scenario: agent told to send funds to an unapproved wallet.
-export const ROGUE: AgentTask = {
-  taskId: 666n,
-  name: "Drain to attacker wallet",
-  vendor: "Unapproved wallet (prompt-injection)",
-  payee: ATTACKER,
-  amount: 5n * USDC_UNIT,
-};
-
-export interface Budget {
-  id: bigint;
-  name: string;
-}
-
-// Each budget is a zero-cost muxed sub-address of the same pool account.
-export const BUDGETS: Budget[] = [
-  { id: 1n, name: "Research agent" },
-  { id: 2n, name: "Marketing agent" },
-  { id: 3n, name: "Ops agent" },
-];
 
 export function fmtUSDC(stroops: bigint, maxFrac = 2): string {
   const neg = stroops < 0n;

@@ -47,6 +47,20 @@ jobs:
         run: |
           npm test
           npm run build
+      # The mainnet bundle is built on every push, not first on cutover day, so the gate that
+      # keeps the demo key and testnet endpoints out of it is known to work before it matters.
+      # The ids are stand-ins of the right shape; nothing here is deployed.
+      - name: Mainnet bundle carries no demo, keys or testnet endpoints
+        working-directory: web
+        env:
+          EUNOMIA_RPC_URL: https://rpc.example.com
+          EUNOMIA_FACTORY_ID: CBQHNAXSI55GX2GN6D67GK7BHVPSLJUGZQEU7WJ5LKR5PNUCGLIMAO4K
+          EUNOMIA_REGISTRY_ID: CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE
+          EUNOMIA_DEPOSIT_CAP: "100"
+        run: |
+          npx vite build --mode mainnet
+          node scripts/headers.mjs
+          npm run check:no-secrets
 
   circuits:
     name: Circuits — witness tests

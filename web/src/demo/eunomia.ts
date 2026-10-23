@@ -3,15 +3,10 @@
 
 import { Keypair } from "@stellar/stellar-sdk";
 import { basicNodeSigner } from "@stellar/stellar-sdk/contract";
-import { Client } from "./treasuryClient";
-import { contractErr, errText } from "./wallet-errors";
-import {
-  AGENT_PK,
-  AGENT_SECRET,
-  NETWORK_PASSPHRASE,
-  RPC_URL,
-  TREASURY_ID,
-} from "../config";
+import { Client } from "../lib/treasuryClient";
+import { contractErr, errText } from "../lib/wallet-errors";
+import { NETWORK_PASSPHRASE, RPC_URL } from "../config";
+import { AGENT_PK, AGENT_SECRET, TREASURY_ID } from "./config";
 
 const agentKp = Keypair.fromSecret(AGENT_SECRET);
 const signer = basicNodeSigner(agentKp, NETWORK_PASSPHRASE);
@@ -26,8 +21,8 @@ const treasury = new Client({
 
 // One shape across the demo (this file) and the per-user product (userTreasury.ts) —
 // re-exported here so Dashboard's imports keep working from a single definition.
-export type { PayResult, EunomiaState } from "./userTreasury";
-import type { PayResult, EunomiaState } from "./userTreasury";
+export type { PayResult, EunomiaState } from "../lib/userTreasury";
+import type { PayResult, EunomiaState } from "../lib/userTreasury";
 
 export async function readState(): Promise<EunomiaState> {
   const [bal, cfg, day] = await Promise.all([

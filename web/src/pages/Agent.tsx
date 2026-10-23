@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import AgentLoop from "../components/AgentLoop";
 import BudgetRequestCard from "../components/BudgetRequestCard";
 import ExceptionRequests from "../components/ExceptionRequests";
-import { EXPLORER, fmtXlm, shortAddr } from "../config";
+import { EXPLORER, IS_TESTNET, fmtXlm, shortAddr } from "../config";
 import { useNow } from "../lib/useNow";
 import { useTreasury } from "../state/useTreasury";
 
@@ -123,7 +123,7 @@ export default function Agent() {
               </label>
             </div>
             <label className="lab">
-              <span className="eyebrow">Agent public key (optional)</span>
+              <span className="eyebrow">Agent public key{IS_TESTNET ? " (optional)" : ""}</span>
               <input
                 className="field field--mono"
                 aria-label="External agent public key"
@@ -134,8 +134,9 @@ export default function Agent() {
               />
             </label>
             <div className="panel__note">
-              Leave empty to run the built-in demo agent on this device. Paste a key to authorise an external agent
-              (Claude via eunomia-mcp) — its secret never leaves the agent's machine; you only sign the cap and the deadline.
+              {IS_TESTNET && "Leave empty to run the built-in demo agent on this device. "}
+              {IS_TESTNET ? "Paste a key to authorise an external agent" : "Paste your agent's key"} (Claude via eunomia-mcp) —
+              its secret never leaves the agent's machine; you only sign the cap and the deadline.
             </div>
             <div>
               <button className="btn btn--lg" onClick={() => void doStart()} disabled={!!t.busy} type="button">

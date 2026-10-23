@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { muxedFor, sendDeposit, readDeposits, type Deposit } from "../lib/muxed";
-import { AGENT_PK, BUDGETS, POOL_PK, shortAddr, txUrl, contractUrl } from "../config";
+import { muxedFor, sendDeposit, readDeposits, type Deposit } from "./muxed";
+import { shortAddr, txUrl, contractUrl } from "../config";
+import { AGENT_PK, BUDGETS, POOL_PK } from "./config";
 
 const EASE = [0.2, 0.7, 0.3, 1] as const;
 

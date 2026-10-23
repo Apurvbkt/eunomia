@@ -3,7 +3,7 @@
 // escape hatch and stays folded: the product is the agent paying on its own. The contract
 // still has the final word on a hand payment; a BLOCKED result is the product working.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { EXPLORER, fmtXlm, SERVICE, shortAddr } from "../config";
+import { EXPLORER, fmtXlm, SAMPLE_VENDOR, shortAddr } from "../config";
 import { useTreasury } from "../state/useTreasury";
 import { executorFor } from "../lib/walletKit";
 import { isPayee, makeTreasury } from "../lib/userTreasury";
@@ -273,9 +273,13 @@ export default function Payments() {
             />
           </div>
           <div className="rowline">
-            <button className="linkbtn" type="button" onClick={() => setNewPayee(SERVICE)}>
-              use the sample vendor ({shortAddr(SERVICE)})
-            </button>
+            {SAMPLE_VENDOR ? (
+              <button className="linkbtn" type="button" onClick={() => setNewPayee(SAMPLE_VENDOR ?? "")}>
+                use the sample vendor ({shortAddr(SAMPLE_VENDOR)})
+              </button>
+            ) : (
+              <span />
+            )}
             <button className="btn" onClick={() => void doAdd()} disabled={!!t.busy} type="button">
               {t.busy === "whitelist" ? "Adding…" : "Add payee"}
             </button>
@@ -320,10 +324,15 @@ export default function Payments() {
                 {payees.length === 0 && (
                   <div className="panel__note">
                     No payees yet —{" "}
-                    <button className="linkbtn" type="button" onClick={() => setPayTo(SERVICE)}>
-                      use the sample vendor ({shortAddr(SERVICE)})
-                    </button>{" "}
-                    or approve one above.
+                    {SAMPLE_VENDOR && (
+                      <>
+                        <button className="linkbtn" type="button" onClick={() => setPayTo(SAMPLE_VENDOR ?? "")}>
+                          use the sample vendor ({shortAddr(SAMPLE_VENDOR)})
+                        </button>{" "}
+                        or{" "}
+                      </>
+                    )}
+                    approve one above.
                   </div>
                 )}
               </div>

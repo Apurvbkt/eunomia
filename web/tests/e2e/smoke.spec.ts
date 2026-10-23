@@ -5,7 +5,7 @@ import {
   EunomiaPage,
   expect,
 } from "./eunomiaTest";
-import { SERVICE } from "../../src/config";
+import { DEMO_VENDOR as SERVICE } from "../../src/config";
 
 const test = base.extend<{
   eunomia: EunomiaPage;

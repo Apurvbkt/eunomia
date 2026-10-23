@@ -38,7 +38,7 @@ export default function WalletChip({
   const connect = async () => {
     setConnecting(true);
     // On a phone the modal leads with WalletConnect (issue #9) — pairing happens in the
-    // wallet app, and it must be on Testnet, so say that before the modal opens.
+    // wallet app, and it must be on this build's network, so say that before the modal opens.
     if (currentDevice() === "mobile" && wcConfigured) {
       toastApi?.toast("info", MOBILE_WALLET_HINT);
     }

@@ -33,10 +33,17 @@ export function inlineScriptHashes(html) {
 
 const hashes = [...new Set(htmlFiles(DIST).flatMap((f) => inlineScriptHashes(readFileSync(f, "utf8"))))];
 
+// The network the bundle was built for, written by vite.config.ts beside it.
+const build = JSON.parse(readFileSync(join(DIST, "build-info.json"), "utf8"));
+const testnet = build.network === "testnet";
+// A mainnet build talks to a pinned RPC provider, which is not under *.stellar.org.
+const rpcOrigin = /\.stellar\.org$/.test(new URL(build.rpcOrigin).hostname) ? [] : [build.rpcOrigin];
+
 // Every origin the app talks to, and why. Anything not here is refused by the browser.
 const connect = [
   "'self'",
   "https://*.stellar.org", // Soroban RPC, Horizon, friendbot (testnet and mainnet)
+  ...rpcOrigin, // the pinned mainnet RPC
   "https://*.supabase.co", // activity + funnel tables
   "wss://*.supabase.co",
   "https://*.walletconnect.org", // WalletConnect v2 (mobile wallets)
@@ -45,7 +52,7 @@ const connect = [
   "wss://*.walletconnect.com",
   "https://*.reown.com",
   "https://*.web3modal.org",
-  "https://tr-mock-anchor.fly.dev", // the TRY → USDC anchor leg
+  ...(testnet ? ["https://tr-mock-anchor.fly.dev"] : []), // the TRY → USDC anchor leg (testnet sandbox)
   "https://cloudflareinsights.com", // Web Analytics beacon
 ];
 

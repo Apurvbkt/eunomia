@@ -6,7 +6,7 @@
 // a mystery code at payment time into one sentence at setup time.
 import { Horizon, StrKey } from "@stellar/stellar-sdk";
 import { HORIZON_URL } from "../config";
-import { ANCHOR_USDC_ISSUER, type TokenCode } from "./token";
+import { USDC_ISSUER, type TokenCode } from "./token";
 
 export interface HorizonBalanceLine {
   asset_type: string;
@@ -15,7 +15,7 @@ export interface HorizonBalanceLine {
 }
 
 export const trustsUsdc = (balances: HorizonBalanceLine[]): boolean =>
-  balances.some((b) => b.asset_code === "USDC" && b.asset_issuer === ANCHOR_USDC_ISSUER);
+  balances.some((b) => b.asset_code === "USDC" && b.asset_issuer === USDC_ISSUER);
 
 /** True only when Horizon says `payee` cannot hold the treasury's token. XLM needs no
  *  trustline and contracts (C…) hold any token; every other doubt answers false so a
@@ -25,7 +25,7 @@ export async function payeeLacksTrustline(
   token: TokenCode,
   load: (account: string) => Promise<{ balances: HorizonBalanceLine[] }> = (a) => new Horizon.Server(HORIZON_URL).loadAccount(a),
 ): Promise<boolean> {
-  if (token !== "USDC" || !StrKey.isValidEd25519PublicKey(payee) || payee === ANCHOR_USDC_ISSUER) return false;
+  if (token !== "USDC" || !StrKey.isValidEd25519PublicKey(payee) || payee === USDC_ISSUER) return false;
   try {
     return !trustsUsdc((await load(payee)).balances);
   } catch (e) {
