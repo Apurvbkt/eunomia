@@ -6,6 +6,7 @@ they were written under), grouped by release wave. Full detail lives in the
 deployed addresses and on-chain proofs in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ## [Unreleased]
+- **eunomia-mcp** — package releases are tracked in [`packages/mcp/CHANGELOG.md`](packages/mcp/CHANGELOG.md).
 
 - **Fixed (the 08-07 silent deploy)** — a relayed transaction could be announced as done
   before the ledger agreed. The relay waits a few seconds and then answers 200 with whatever
@@ -281,7 +282,16 @@ Built during Stellar Hacks: Real-World ZK; submitted to DoraHacks.
   muxed-account funding rail (zero-cost sub-address attribution) · spectral landing + pitch
   deck · build-time guard refusing the demo key off-testnet
 
-[0.3.1]: https://github.com/eunomia-finance/eunomia/commits/main
-[0.3.0]: https://github.com/eunomia-finance/eunomia/commits/main
-[0.2.0]: https://github.com/eunomia-finance/eunomia/commits/main
-[0.1.0]: https://github.com/eunomia-finance/eunomia/commits/main
+[Unreleased]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-09-20
+[0.9.0]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-09-18&until=2026-09-19
+[0.8.0]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-09-16&until=2026-09-17
+[0.7.0]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-09-14&until=2026-09-15
+[0.6.0]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-08-05&until=2026-08-12
+[0.5.0]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-07-08&until=2026-08-04
+[0.4.1]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-07-07&until=2026-07-07
+[0.4.0]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-07-07&until=2026-07-07
+[0.3.2]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-07-06&until=2026-07-06
+[0.3.1]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-07-02&until=2026-07-02
+[0.3.0]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-07-01&until=2026-07-01
+[0.2.0]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-06-18&until=2026-06-23
+[0.1.0]: https://github.com/eunomia-finance/eunomia/commits/main?since=2026-06-03&until=2026-06-03
